@@ -1,0 +1,11 @@
+{
+    "name": "messenger-fullstack-proj",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "dev": "node --watch main.js"
+    },
+    "keywords": [],
+    "type": "module"
+}
