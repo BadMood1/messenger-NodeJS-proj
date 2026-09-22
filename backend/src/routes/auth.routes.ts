@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { login, me, register } from "../controllers/auth.controller.js";
+import { login, logout, me, refresh, register } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 // Express Router — способ вынести маршруты из `app.js`
 //  в отдельные файлы и группировать их по сущностям.
@@ -11,6 +11,8 @@ const router = Router();
 // /api/auth/... (в app.ts подвязал)
 router.post("/register", register);
 router.post("/login", login);
-router.get("/me", authMiddleware, me);
+router.post("/refresh", refresh);
+router.post("/logout", logout);
 
+router.get("/me", authMiddleware, me);
 export default router;

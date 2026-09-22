@@ -4,6 +4,7 @@ import { AppError } from "../errors/app-error.js";
 import { createAccessToken } from "../lib/jwt.js";
 import { prisma } from "../lib/prisma.js";
 import type { LoginUserInput, RegisterUserInput } from "../validators/auth.schema.js";
+import { createRefreshSession, findSessionByRefreshToken } from "./session.service.js";
 
 export const registerUser = async (data: RegisterUserInput) => {
     const existingUser = await prisma.user.findFirst({
@@ -52,12 +53,15 @@ export const loginUser = async (data: LoginUserInput) => {
         throw new AppError(401, "Invalid credentials");
     }
 
+    const accessToken = await createAccessToken(user.id);
+
+    const refreshToken = await createRefreshSession(user.id);
+
     // passwordHash нужен внутри сервера для проверки,
     // но клиенту его возвращать нельзя.
     const { passwordHash, ...safeUser } = user;
-    const accessToken = await createAccessToken(user.id);
 
-    return { user: safeUser, accessToken };
+    return { user: safeUser, accessToken, refreshToken };
 };
 
 // Получаем текущего пользователя по userId, который мы положили в res.locals.userId в authMiddleware
@@ -76,4 +80,18 @@ export const getCurrentUser = async (userId: string) => {
     }
 
     return user;
+};
+
+export const refreshAccessToken = async (refreshToken: string) => {
+    const session = await findSessionByRefreshToken(refreshToken);
+
+    if (!session) {
+        throw new AppError(401, "Invalid refresh token");
+    }
+
+    if (session.expiresAt < new Date()) {
+        throw new AppError(401, "Refresh token expired");
+    }
+
+    return createAccessToken(session.userId);
 };

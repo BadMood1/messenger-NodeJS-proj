@@ -25,3 +25,11 @@ Content-Type: application/json
   "identifier": "bmoood",
   "password": "password123"
 }
+
+###
+
+POST http://localhost:5000/api/auth/refresh
+
+###
+
+POST http://localhost:5000/api/auth/logout
