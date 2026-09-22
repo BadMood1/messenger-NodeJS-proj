@@ -1,9 +1,17 @@
 import express from "express";
 import { prisma } from "./lib/prisma.js";
+import authRouter from "./routes/auth.routes.js";
+import { errorHandler } from "./middleware/error-handler.js";
+import cookieParser from "cookie-parser";
 
 const app = express();
 
 app.use(express.json());
+app.use(cookieParser());
+app.use("/api/auth", authRouter);
+
+app.use(errorHandler);
+//
 
 app.get("/", (req, res) => {
     res.send("Hello, World!");
