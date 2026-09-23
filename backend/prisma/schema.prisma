@@ -37,6 +37,7 @@ model User {
   sessions Session[]
 
   conversationMembers ConversationMember[]
+  messages Message[]
 }
 
 model Session {
@@ -80,6 +81,7 @@ model Conversation {
   directKey String? @unique
 
   members ConversationMember[]
+  messages Message[]
 }
 
 model ConversationMember {
@@ -95,4 +97,26 @@ model ConversationMember {
 
   // Быстро искать все чаты конкретного пользователя
   @@index([userId])
+}
+
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  senderId       String
+  conversationId String
+
+  // Кто отправил сообщение
+  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  // В каком чате находится сообщение
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  // Главный индекс для загрузки истории конкретного чата
+  @@index([conversationId, createdAt])
+
+  @@index([senderId])
 }
