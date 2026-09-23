@@ -13,6 +13,12 @@ enum FriendshipStatus {
   ACCEPTED
 }
 
+//
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
 model User {
   id        String   @id @default(uuid())
   name      String
@@ -29,6 +35,8 @@ model User {
   receivedFriendships Friendship[] @relation("ReceivedFriendships")
 
   sessions Session[]
+
+  conversationMembers ConversationMember[]
 }
 
 model Session {
@@ -58,4 +66,33 @@ model Friendship {
   @@unique([senderId, receiverId])
   @@index([senderId])
   @@index([receiverId])
+}
+
+
+model Conversation {
+  id        String           @id @default(uuid())
+  type      ConversationType
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Для DIRECT будет строка из двух userId.
+  // Нужна, чтобы одна пара не создала два одинаковых DM.
+  directKey String? @unique
+
+  members ConversationMember[]
+}
+
+model ConversationMember {
+  conversationId String
+  userId         String
+  joinedAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Один пользователь не может дважды состоять в одном чате
+  @@id([conversationId, userId])
+
+  // Быстро искать все чаты конкретного пользователя
+  @@index([userId])
 }
