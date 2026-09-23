@@ -3,12 +3,17 @@ import { prisma } from "./lib/prisma.js";
 import authRouter from "./routes/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import cookieParser from "cookie-parser";
+import { userRouter } from "./routes/user.routes.js";
+import { friendRouter } from "./routes/friend.routes.js";
 
 const app = express();
 
 app.use(express.json());
 app.use(cookieParser());
+
 app.use("/api/auth", authRouter);
+app.use("/api/users", userRouter);
+app.use("/api/friends", friendRouter);
 
 app.use(errorHandler);
 //
