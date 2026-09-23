@@ -5,6 +5,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import cookieParser from "cookie-parser";
 import { userRouter } from "./routes/user.routes.js";
 import { friendRouter } from "./routes/friend.routes.js";
+import { conversationRouter } from "./routes/conversation.routes.js";
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(cookieParser());
 app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);
 app.use("/api/friends", friendRouter);
+app.use("/api/conversations", conversationRouter);
 
 app.use(errorHandler);
 //
