@@ -1,0 +1,54 @@
+# Messenger API: direct conversations and messages
+# All endpoints in this file require a valid access JWT.
+@baseUrl = http://localhost:5000
+@accessToken =
+@otherUserId =
+@conversationId =
+@messageId =
+@cursor =
+
+### List my direct conversations
+# Each item contains the other participant in the `user` field.
+GET {{baseUrl}}/api/conversations
+Authorization: Bearer {{accessToken}}
+
+### Open or create a direct conversation
+# otherUserId is the id of the user with whom to open a chat.
+# Returns an existing direct chat for this pair, or creates one.
+POST {{baseUrl}}/api/conversations/direct/{{otherUserId}}
+Authorization: Bearer {{accessToken}}
+
+### Send message
+# conversationId must identify a chat where the authenticated user is a member.
+POST {{baseUrl}}/api/conversations/{{conversationId}}/messages
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "content": "Hello from the HTTP client"
+}
+
+### Get latest messages
+# limit is 1-50 and defaults to 30. The response includes messages and nextCursor.
+GET {{baseUrl}}/api/conversations/{{conversationId}}/messages?limit=30
+Authorization: Bearer {{accessToken}}
+
+### Get next page of older messages
+# Set @cursor to nextCursor from the previous history response.
+GET {{baseUrl}}/api/conversations/{{conversationId}}/messages?limit=30&cursor={{cursor}}
+Authorization: Bearer {{accessToken}}
+
+### Edit my message
+# Only the message sender may edit it. content cannot be blank and is limited to 4000 characters.
+PATCH {{baseUrl}}/api/conversations/messages/{{messageId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "content": "Updated message text"
+}
+
+### Delete my message
+# Only the message sender may delete it. Returns 204 with no body.
+DELETE {{baseUrl}}/api/conversations/messages/{{messageId}}
+Authorization: Bearer {{accessToken}}

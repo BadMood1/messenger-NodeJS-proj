@@ -1,35 +1,59 @@
+# Messenger API: auth and users
+# Replace the empty variables before sending protected requests.
+@baseUrl = http://localhost:5000
+@accessToken =
+@refreshToken =
+@searchQuery = andrei
+
 ### Health check
-GET http://localhost:5000/
+# Confirms that the Express server is running.
+GET {{baseUrl}}/
 
-### Get all users
-
-GET http://localhost:5000/api/users
-
-###
-
-POST http://localhost:5000/api/auth/register
+### Register a user
+# Creates a user. Change username and email before re-sending: both must be unique.
+POST {{baseUrl}}/api/auth/register
 Content-Type: application/json
 
 {
   "name": "Andrei",
-  "username": "bmoood",
+  "username": "andrei",
   "email": "andrei@example.com",
-  "password": "passwor"
-}
-
-### Login
-POST http://localhost:5000/api/auth/login
-Content-Type: application/json
-
-{
-  "identifier": "bmoood",
   "password": "password123"
 }
 
-###
+### Login
+# identifier accepts either username or email.
+# Copy accessToken from the JSON response into @accessToken.
+# Copy refreshToken from the Set-Cookie response header into @refreshToken.
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
 
-POST http://localhost:5000/api/auth/refresh
+{
+  "identifier": "andrei",
+  "password": "password123"
+}
 
-###
+### Current authenticated user
+# Requires a valid access JWT. Returns 401 when the token is missing, invalid, or expired.
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{accessToken}}
 
-POST http://localhost:5000/api/auth/logout
+### Refresh access token
+# Sends the refresh token as a cookie and returns a new 15-minute access token.
+POST {{baseUrl}}/api/auth/refresh
+Cookie: refreshToken={{refreshToken}}
+
+### Logout
+# Deletes the refresh session and clears the refresh-token cookie. Returns 204 with no body.
+POST {{baseUrl}}/api/auth/logout
+Cookie: refreshToken={{refreshToken}}
+
+### Search users by username
+# q is optional: an empty q returns an empty users array.
+GET {{baseUrl}}/api/users/search?q={{searchQuery}}
+Authorization: Bearer {{accessToken}}
+
+### Get all users (development endpoint)
+# Warning: this route currently returns Prisma User records without a select/omit filter.
+# Do not use it as a client-facing endpoint until sensitive fields are explicitly excluded.
+GET {{baseUrl}}/api/users

@@ -4,6 +4,3 @@ dist/
 *.log
 
 /src/generated/prisma
-
-r_friendship.http
-requests.http

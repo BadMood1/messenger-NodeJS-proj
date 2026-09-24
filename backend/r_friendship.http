@@ -1,0 +1,41 @@
+# Messenger API: friendships
+# All endpoints in this file require a valid access JWT.
+@baseUrl = http://localhost:5000
+@accessToken =
+@targetUserId =
+@requestId =
+
+### List friends
+# Returns accepted friendships for the authenticated user.
+GET {{baseUrl}}/api/friends
+Authorization: Bearer {{accessToken}}
+
+### List incoming friend requests
+# Requests sent to the authenticated user and waiting for a decision.
+GET {{baseUrl}}/api/friends/requests/incoming
+Authorization: Bearer {{accessToken}}
+
+### List outgoing friend requests
+# Requests sent by the authenticated user and still pending.
+GET {{baseUrl}}/api/friends/requests/outgoing
+Authorization: Bearer {{accessToken}}
+
+### Send friend request
+# targetUserId is the id of the user whom the current user wants to add.
+POST {{baseUrl}}/api/friends/requests/{{targetUserId}}
+Authorization: Bearer {{accessToken}}
+
+### Accept incoming request
+# requestId is the Friendship id from the incoming-requests response.
+POST {{baseUrl}}/api/friends/requests/{{requestId}}/accept
+Authorization: Bearer {{accessToken}}
+
+### Cancel or decline friend request
+# The current user must be the sender or receiver of this request. Returns 204 with no body.
+DELETE {{baseUrl}}/api/friends/requests/{{requestId}}
+Authorization: Bearer {{accessToken}}
+
+### Remove friend
+# targetUserId is the id of an existing friend. Returns 204 with no body.
+DELETE {{baseUrl}}/api/friends/{{targetUserId}}
+Authorization: Bearer {{accessToken}}

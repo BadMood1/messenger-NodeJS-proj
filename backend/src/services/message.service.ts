@@ -108,3 +108,68 @@ export const getMessages = async (conversationId: string, userId: string, cursor
         nextCursor,
     };
 };
+
+export const editMessage = async (messageId: string, userId: string, content: string) => {
+    // Ищем сообщение, чтобы проверить автора
+    const message = await prisma.message.findUnique({
+        where: {
+            id: messageId,
+        },
+    });
+
+    if (!message) {
+        throw new AppError(404, "Message not found");
+    }
+
+    // Редактировать можно только своё сообщение
+    if (message.senderId !== userId) {
+        throw new AppError(403, "You cannot edit this message");
+    }
+
+    // возвр. обновлённый message и данные sender'а
+    return prisma.message.update({
+        where: {
+            id: messageId,
+        },
+
+        data: {
+            content,
+        },
+
+        include: {
+            sender: {
+                select: {
+                    id: true,
+                    name: true,
+                    username: true,
+                    image: true,
+                },
+            },
+        },
+    });
+};
+
+//
+export const deleteMessage = async (messageId: string, userId: string) => {
+    // Ищем сообщение, чтобы проверить автора
+    const message = await prisma.message.findUnique({
+        where: {
+            id: messageId,
+        },
+    });
+
+    if (!message) {
+        throw new AppError(404, "Message not found");
+    }
+
+    // Удалять можно только своё сообщение
+    if (message.senderId !== userId) {
+        throw new AppError(403, "You cannot delete this message");
+    }
+
+    await prisma.message.delete({
+        where: {
+            id: messageId,
+        },
+    });
+};
