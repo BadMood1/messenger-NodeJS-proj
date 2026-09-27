@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 import { useAuth } from "../features/auth/useAuth";
 
@@ -45,18 +45,13 @@ const BottomDecor = () => (
 );
 
 export const LoginPage = () => {
-    const { user, login } = useAuth();
+    const { login } = useAuth();
     const navigate = useNavigate();
 
     const [identifier, setIdentifier] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
-
-    // Если уже вошли — login page больше не нужна
-    if (user) {
-        return <Navigate to="/" replace />;
-    }
 
     const handleSubmit = async (event: FormEvent) => {
         event.preventDefault();
