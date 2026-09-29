@@ -6,8 +6,11 @@ type ConversationSidebarProps = {
     conversations: Conversation[];
     loading: boolean;
     error: string | null;
+    selectedConversationId: string | null;
+    onSelectConversation: (id: string) => void;
 };
 
+// Получаем до двух первых букв имени для avatar без картинки.
 const getInitials = (name: string) => {
     return name
         .trim()
@@ -17,6 +20,7 @@ const getInitials = (name: string) => {
         .join("");
 };
 
+// Для сегодняшнего диалога показываем время, для более старого — дату.
 const formatConversationTime = (updatedAt: string) => {
     const date = new Date(updatedAt);
 
@@ -42,12 +46,26 @@ const formatConversationTime = (updatedAt: string) => {
     }).format(date);
 };
 
-const ConversationRow = ({ conversation }: { conversation: Conversation }) => {
+// Отображает одного собеседника из полученной conversation.
+const ConversationRow = ({
+    conversation,
+    selected,
+    onSelect,
+}: {
+    conversation: Conversation;
+    selected: boolean;
+    onSelect: (id: string) => void;
+}) => {
     const displayName = conversation.user?.name || conversation.user?.username || "Unknown user";
     const preview = conversation.user ? `@${conversation.user.username}` : "User unavailable";
 
     return (
-        <div className="flux-conversation-row">
+        <button
+            type="button"
+            className={`flux-conversation-row${selected ? " flux-conversation-row-selected" : ""}`}
+            onClick={() => onSelect(conversation.id)}
+            aria-pressed={selected}
+        >
             <div className="flux-conversation-avatar">
                 {conversation.user?.image ? (
                     <img
@@ -74,11 +92,17 @@ const ConversationRow = ({ conversation }: { conversation: Conversation }) => {
                     {preview}
                 </p>
             </div>
-        </div>
+        </button>
     );
 };
 
-export const ConversationSidebar = ({ conversations, loading, error }: ConversationSidebarProps) => (
+export const ConversationSidebar = ({
+    conversations,
+    loading,
+    error,
+    selectedConversationId,
+    onSelectConversation,
+}: ConversationSidebarProps) => (
     <aside className="flux-conversation-sidebar">
         <header className="flux-conversation-header">
             <div className="flex items-center gap-3 md:block">
@@ -111,6 +135,7 @@ export const ConversationSidebar = ({ conversations, loading, error }: Conversat
         </header>
 
         <div className="flux-conversation-list">
+            {/* Показываем только одно состояние списка за раз. */}
             {loading ? (
                 <div className="flux-conversation-state" role="status">
                     Loading conversations...
@@ -123,7 +148,12 @@ export const ConversationSidebar = ({ conversations, loading, error }: Conversat
                 <div className="flux-conversation-state">No conversations yet</div>
             ) : (
                 conversations.map((conversation) => (
-                    <ConversationRow key={conversation.id} conversation={conversation} />
+                    <ConversationRow
+                        key={conversation.id}
+                        conversation={conversation}
+                        selected={conversation.id === selectedConversationId}
+                        onSelect={onSelectConversation}
+                    />
                 ))
             )}
         </div>

@@ -19,6 +19,7 @@ type ConversationsResponse = {
     conversations: Conversation[];
 };
 
+// Загружаем доступные текущему пользователю DIRECT-диалоги.
 export const getConversations = async (accessToken: string) => {
     const response = await fetch(`${API_URL}/conversations`, {
         headers: {
@@ -30,6 +31,7 @@ export const getConversations = async (accessToken: string) => {
         let message = "Failed to load conversations";
 
         try {
+            // пробуем прочитать поле error из JSON, который вернул backend
             const body = (await response.json()) as { error?: string };
             message = body.error ?? message;
         } catch {
