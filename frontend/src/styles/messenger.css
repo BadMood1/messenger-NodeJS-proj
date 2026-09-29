@@ -1,0 +1,256 @@
+@layer components {
+    /* ==================== SHELL ==================== */
+
+    .flux-messenger-shell {
+        @apply relative isolate flex h-dvh min-w-0 w-full overflow-hidden bg-linear-to-br from-[#d7eaff] via-[#eef7ff] to-[#dceeff] p-0 text-slate-900 dark:from-[#08172b] dark:via-[#06111f] dark:to-[#0a1b31] dark:text-slate-100 md:p-1.5 lg:p-2;
+    }
+
+    .flux-messenger-ambient {
+        @apply pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_5%_18%,rgba(96,165,250,0.48),transparent_27%),radial-gradient(circle_at_7%_48%,rgba(167,139,250,0.26),transparent_22%),radial-gradient(circle_at_7%_82%,rgba(45,212,191,0.30),transparent_28%),radial-gradient(circle_at_30%_0%,rgba(167,139,250,0.14),transparent_30%)] dark:bg-[radial-gradient(circle_at_5%_20%,rgba(14,165,233,0.22),transparent_28%),radial-gradient(circle_at_7%_48%,rgba(139,92,246,0.16),transparent_23%),radial-gradient(circle_at_7%_82%,rgba(45,212,191,0.16),transparent_29%),radial-gradient(circle_at_30%_0%,rgba(59,130,246,0.12),transparent_31%)];
+    }
+
+    /* ==================== NAVIGATION ==================== */
+
+    .flux-nav-rail {
+        @apply relative z-10 hidden h-full w-20 shrink-0 flex-col justify-between overflow-hidden rounded-[20px] border border-white/65 bg-linear-to-b from-white/58 via-blue-50/38 to-cyan-50/26 px-2 py-4 shadow-[0_18px_50px_rgba(63,120,180,0.11)] backdrop-blur-lg dark:border-cyan-200/10 dark:from-[#0d2742]/62 dark:via-[#081b31]/56 dark:to-[#07162a]/60 dark:shadow-[0_20px_55px_rgba(0,0,0,0.22)] md:flex lg:w-22 lg:rounded-[22px] lg:px-2.5;
+    }
+
+    .flux-nav-brand {
+        @apply flex h-14 w-14 items-center justify-center;
+    }
+
+    .flux-nav-item {
+        @apply flex min-h-16 w-full flex-col items-center justify-center gap-1.5 rounded-2xl px-1 py-2.5 text-xs font-medium text-slate-500 transition-colors hover:bg-blue-50/80 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-100 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-nav-item-active {
+        @apply border border-blue-100/70 bg-linear-to-br from-blue-100/95 via-sky-100/72 to-cyan-50/75 text-blue-700 shadow-sm shadow-blue-200/30 dark:border-cyan-300/10 dark:from-blue-500/24 dark:via-sky-500/14 dark:to-cyan-400/8 dark:text-cyan-300 dark:shadow-none;
+    }
+
+    .flux-nav-avatar {
+        @apply relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-linear-to-br from-sky-300 to-blue-600 text-sm font-semibold text-white shadow-sm shadow-blue-300/25 dark:border-slate-700 dark:from-cyan-600 dark:to-blue-700 dark:shadow-none;
+    }
+
+    .flux-nav-avatar span {
+        @apply absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-400 dark:border-[#07172a] dark:bg-teal-400;
+    }
+
+    .flux-icon-button {
+        @apply flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-blue-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 dark:text-slate-400 dark:hover:bg-white/6 dark:hover:text-slate-100 dark:focus-visible:outline-cyan-400;
+    }
+
+    /* ==================== CONVERSATIONS ==================== */
+
+    .flux-conversation-sidebar {
+        @apply relative z-10 flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-none border-0 bg-linear-to-b from-white/96 via-[#f9fcff]/96 to-[#f1f7ff]/94 shadow-none dark:from-[#0a1c31] dark:via-[#08182b] dark:to-[#071526] md:-ml-px md:w-72 md:flex-none md:rounded-[20px] md:border md:border-white/80 md:shadow-[0_18px_48px_rgba(71,112,160,0.11)] md:dark:border-white/8 md:dark:shadow-[0_20px_55px_rgba(0,0,0,0.22)] lg:w-80 lg:rounded-[22px];
+    }
+
+    .flux-conversation-header {
+        @apply shrink-0 border-b border-blue-100/70 px-4 py-3.5 dark:border-white/7 md:px-4 md:pb-4 md:pt-4 lg:px-5 lg:pb-5 lg:pt-5;
+    }
+
+    .flux-conversation-search {
+        @apply flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-blue-100/90 bg-blue-50/55 px-3 text-slate-400 transition-colors focus-within:border-blue-300 focus-within:bg-white dark:border-white/8 dark:bg-white/4 dark:text-slate-500 dark:focus-within:border-cyan-500/35 dark:focus-within:bg-white/5 md:mt-4;
+    }
+
+    .flux-conversation-search input {
+        @apply min-w-0 flex-1 truncate bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500;
+    }
+
+    .flux-conversation-list {
+        @apply min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-3;
+        scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
+        scrollbar-width: thin;
+    }
+
+    .flux-conversation-state {
+        @apply flex min-h-40 items-center justify-center px-5 text-center text-sm text-slate-500 dark:text-slate-400;
+    }
+
+    .flux-conversation-row {
+        @apply flex min-h-16 cursor-pointer items-center gap-3 rounded-2xl border border-transparent px-3 py-2.5 transition-colors hover:bg-blue-50/75 dark:hover:bg-white/4;
+    }
+
+    .flux-conversation-row-selected {
+        @apply border-blue-100/75 bg-linear-to-r from-blue-100/80 via-sky-100/60 to-cyan-50/55 shadow-sm shadow-blue-100/40 hover:from-blue-100/90 hover:via-sky-100/70 hover:to-cyan-50/65 dark:border-blue-400/10 dark:from-blue-500/20 dark:via-sky-500/12 dark:to-cyan-400/7 dark:shadow-none dark:hover:from-blue-500/24 dark:hover:via-sky-500/15 dark:hover:to-cyan-400/9;
+    }
+
+    .flux-conversation-avatar,
+    .flux-chat-avatar {
+        @apply flex shrink-0 items-center justify-center rounded-full border border-white/90 bg-linear-to-br from-cyan-200 via-blue-300 to-indigo-300 font-semibold text-slate-700 shadow-sm dark:border-white/10 dark:from-cyan-700 dark:via-blue-700 dark:to-indigo-800 dark:text-white dark:shadow-none;
+    }
+
+    .flux-conversation-avatar {
+        @apply h-11 w-11 text-xs;
+    }
+
+    .flux-conversation-avatar-blue {
+        @apply from-sky-200 via-blue-300 to-blue-500 dark:from-sky-700 dark:via-blue-700 dark:to-indigo-800;
+    }
+
+    .flux-conversation-avatar-violet {
+        @apply from-fuchsia-200 via-violet-300 to-blue-400 dark:from-fuchsia-800 dark:via-violet-700 dark:to-blue-800;
+    }
+
+    .flux-conversation-avatar-teal {
+        @apply from-emerald-200 via-cyan-300 to-blue-400 dark:from-emerald-800 dark:via-cyan-700 dark:to-blue-800;
+    }
+
+    .flux-conversation-avatar-amber {
+        @apply from-amber-200 via-orange-200 to-rose-300 dark:from-amber-800 dark:via-orange-800 dark:to-rose-900;
+    }
+
+    .flux-conversation-avatar-slate {
+        @apply from-slate-200 via-sky-200 to-blue-300 dark:from-slate-700 dark:via-slate-700 dark:to-blue-800;
+    }
+
+    .flux-conversation-avatar-mint {
+        @apply from-teal-100 via-emerald-200 to-cyan-300 dark:from-teal-800 dark:via-emerald-800 dark:to-cyan-800;
+    }
+
+    .flux-conversation-unread {
+        @apply flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-cyan-400 to-blue-600 px-1.5 text-[11px] font-semibold leading-none text-white shadow-sm shadow-blue-400/25 dark:from-cyan-400 dark:to-blue-500 dark:shadow-none;
+    }
+
+    .flux-chat-avatar {
+        @apply h-10 w-10 text-sm;
+    }
+
+    .flux-mobile-nav {
+        @apply grid min-h-16 shrink-0 grid-cols-3 border-t border-blue-100/80 bg-white/88 px-3 backdrop-blur-md dark:border-white/7 dark:bg-[#071427]/94 md:hidden;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .flux-mobile-nav button {
+        @apply flex min-w-0 flex-col items-center justify-center gap-1 text-sm font-medium text-slate-500 transition-colors hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-blue-400 dark:text-slate-400 dark:hover:text-cyan-300 dark:focus-visible:outline-cyan-400;
+    }
+
+    /* ==================== CHAT ==================== */
+
+    .flux-chat-panel {
+        @apply relative z-10 hidden h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/85 bg-linear-to-br from-white/98 via-[#f8fbff]/96 to-[#eef6ff]/92 shadow-[0_18px_52px_rgba(71,112,160,0.10)] dark:border-cyan-100/9 dark:from-[#07182a] dark:via-[#061423] dark:to-[#05111f] dark:shadow-[0_20px_58px_rgba(0,0,0,0.24)] md:-ml-px md:flex lg:rounded-[22px];
+    }
+
+    .flux-chat-header {
+        @apply flex h-18 shrink-0 items-center justify-between border-b border-blue-100/70 bg-white/48 px-4 backdrop-blur-sm dark:border-white/7 dark:bg-[#061526]/82 lg:h-20 lg:px-7;
+    }
+
+    .flux-chat-messages {
+        @apply min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4 lg:px-8 lg:py-6;
+        scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+        scrollbar-width: thin;
+    }
+
+    .flux-message-stack {
+        @apply flex min-h-full flex-col justify-end gap-3;
+    }
+
+    .flux-message-day {
+        @apply my-1 flex items-center gap-3 text-xs font-medium text-slate-400 dark:text-slate-500;
+    }
+
+    .flux-message-day::before,
+    .flux-message-day::after {
+        @apply h-px flex-1 bg-blue-100/80 content-[''] dark:bg-white/7;
+    }
+
+    .flux-message-day span {
+        @apply rounded-full border border-blue-100/75 bg-white/65 px-3 py-1 shadow-sm shadow-blue-100/30 dark:border-white/8 dark:bg-white/4 dark:shadow-none;
+    }
+
+    .flux-message-placeholder {
+        --flux-message-meta-space: 3.25rem;
+
+        @apply relative w-fit max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] font-medium leading-5 shadow-sm md:max-w-lg;
+    }
+
+    .flux-message-text {
+        overflow-wrap: anywhere;
+    }
+
+    .flux-message-placeholder-incoming {
+        @apply rounded-bl-md border border-white/70 bg-slate-200/72 text-slate-700 shadow-slate-200/45 dark:border-white/5 dark:bg-[#13243a] dark:text-slate-200 dark:shadow-none;
+    }
+
+    .flux-message-placeholder-outgoing {
+        --flux-message-meta-space: 4.75rem;
+
+        @apply rounded-br-md border border-blue-200/55 bg-linear-to-br from-blue-100 via-blue-200/85 to-sky-200/85 text-slate-800 shadow-blue-200/35 dark:border-blue-400/12 dark:from-blue-600/42 dark:via-blue-600/34 dark:to-cyan-600/26 dark:text-blue-50 dark:shadow-none;
+    }
+
+    .flux-message-meta-spacer {
+        display: inline-block;
+        width: var(--flux-message-meta-space);
+        height: 0;
+    }
+
+    .flux-message-meta {
+        @apply absolute bottom-2.5 right-4 flex items-center gap-1 whitespace-nowrap text-xs font-medium leading-none text-slate-400 dark:text-slate-400;
+    }
+
+    .flux-message-placeholder-outgoing .flux-message-meta {
+        @apply text-blue-600/70 dark:text-cyan-200/75;
+    }
+
+    .flux-message-photo {
+        @apply relative w-72 max-w-[78%] overflow-hidden rounded-2xl rounded-br-md border border-blue-300/65 bg-blue-100 p-1 shadow-sm shadow-blue-200/45 dark:border-cyan-400/35 dark:bg-[#0b2942] dark:shadow-none;
+    }
+
+    .flux-message-photo-scene {
+        @apply relative h-36 overflow-hidden rounded-[13px] bg-linear-to-b from-sky-100 via-blue-200 to-slate-500;
+    }
+
+    .flux-message-photo-scene::before {
+        position: absolute;
+        inset: 24% -8% 28%;
+        content: "";
+        background: linear-gradient(135deg, #567da8 0%, #9bb9d4 43%, #4c7398 44%, #294b6b 100%);
+        clip-path: polygon(0 88%, 18% 34%, 34% 68%, 51% 12%, 68% 65%, 82% 38%, 100% 86%, 100% 100%, 0 100%);
+        filter: drop-shadow(0 10px 12px rgb(30 64 92 / 18%));
+    }
+
+    .flux-message-photo-scene::after {
+        position: absolute;
+        inset: 64% 0 0;
+        content: "";
+        background:
+            linear-gradient(172deg, transparent 0 34%, rgb(255 255 255 / 35%) 35% 38%, transparent 39%),
+            linear-gradient(to bottom, rgb(191 219 254 / 82%), rgb(36 72 104 / 88%));
+    }
+
+    .flux-message-photo-meta {
+        @apply absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-slate-950/45 px-2 py-1 text-xs font-medium leading-none text-white/90 backdrop-blur-sm;
+    }
+
+    /* ==================== COMPOSER ==================== */
+
+    .flux-composer {
+        @apply flex h-13 items-center gap-2 rounded-2xl border border-blue-100 bg-white/88 px-2.5 shadow-sm shadow-blue-100/50 transition-[border-color,box-shadow,background-color] focus-within:border-blue-300 focus-within:bg-white focus-within:shadow-blue-200/45 dark:border-white/10 dark:bg-white/5 dark:shadow-none dark:focus-within:border-cyan-400/35 dark:focus-within:bg-white/7;
+    }
+
+    .flux-composer-action {
+        @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-blue-200 text-blue-500 transition-colors hover:border-blue-400 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 dark:border-cyan-400/30 dark:text-cyan-300 dark:hover:bg-cyan-400/8 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-composer-input {
+        @apply min-w-0 flex-1 bg-transparent px-1 text-[15px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500;
+    }
+
+    .flux-composer-emoji {
+        @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 dark:text-slate-500 dark:hover:bg-white/6 dark:hover:text-cyan-300 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-composer-send {
+        @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-cyan-400 to-blue-600 text-white shadow-sm shadow-blue-500/25 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:from-cyan-400 dark:to-blue-500 dark:focus-visible:outline-cyan-300;
+    }
+
+    @media (width < 48rem) {
+        .flux-conversation-list {
+            scrollbar-width: none;
+        }
+
+        .flux-conversation-list::-webkit-scrollbar {
+            display: none;
+        }
+    }
+}
