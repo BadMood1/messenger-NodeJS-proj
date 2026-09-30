@@ -9,6 +9,7 @@ import {
     Smile,
     Video,
 } from "lucide-react";
+import { useState, type FormEvent, type RefObject } from "react";
 
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { Message } from "../../features/messages/messages.api";
@@ -19,9 +20,14 @@ type ChatPanelProps = {
     messagesLoading: boolean;
     messagesError: string | null;
     currentUserId: string | null;
+    onSendMessage: (content: string) => Promise<void>;
+    messagesContainerRef: RefObject<HTMLDivElement | null>;
+    onMessagesScroll: () => void;
+    isLoadingOlder: boolean;
+    olderMessagesError: string | null;
 };
 
-type MessageBubbleProps = {
+type MessageRowProps = {
     message: Message;
     isOwnMessage: boolean;
 };
@@ -49,13 +55,11 @@ const formatMessageTime = (createdAt: string) => {
     }).format(date);
 };
 
-// Один bubble использует одинаковую систему spacer + metadata для всех текстов.
-const MessageBubble = ({ message, isOwnMessage }: MessageBubbleProps) => (
+// Одна строка сообщения использует общую систему spacer + metadata.
+const MessageRow = ({ message, isOwnMessage }: MessageRowProps) => (
     <div
         className={`flux-message-placeholder ${
-            isOwnMessage
-                ? "flux-message-placeholder-outgoing ml-auto"
-                : "flux-message-placeholder-incoming"
+            isOwnMessage ? "flux-message-placeholder-outgoing ml-auto" : "flux-message-placeholder-incoming"
         }`}
     >
         <span className="flux-message-text">{message.content}</span>
@@ -73,8 +77,41 @@ export const ChatPanel = ({
     messagesLoading,
     messagesError,
     currentUserId,
+    onSendMessage,
+    messagesContainerRef,
+    onMessagesScroll,
+    isLoadingOlder,
+    olderMessagesError,
 }: ChatPanelProps) => {
     const conversationUser = conversation?.user;
+
+    // Отправка сообщения:
+    const [content, setContent] = useState("");
+    const [isSending, setIsSending] = useState(false);
+    const [sendError, setSendError] = useState<string | null>(null);
+
+    const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        // отменяет form
+        event.preventDefault();
+
+        const trimmedContent = content.trim();
+
+        if (!trimmedContent || isSending) {
+            return;
+        }
+
+        setIsSending(true);
+        setSendError(null);
+
+        try {
+            await onSendMessage(trimmedContent);
+            setContent("");
+        } catch (requestError) {
+            setSendError(requestError instanceof Error ? requestError.message : "Failed to send message");
+        } finally {
+            setIsSending(false);
+        }
+    };
 
     if (!conversationUser) {
         return (
@@ -127,7 +164,7 @@ export const ChatPanel = ({
                 </div>
             </header>
 
-            <div className="flux-chat-messages">
+            <div ref={messagesContainerRef} className="flux-chat-messages" onScroll={onMessagesScroll}>
                 {messagesLoading ? (
                     <div className="flux-chat-content-state" role="status">
                         Loading messages...
@@ -140,8 +177,14 @@ export const ChatPanel = ({
                     <div className="flux-chat-content-state">No messages yet</div>
                 ) : (
                     <div className="flux-message-stack">
+                        {isLoadingOlder && <div className="flux-load-older">Loading older messages...</div>}
+                        {olderMessagesError && (
+                            <div className="flux-load-older-error" role="alert">
+                                {olderMessagesError}
+                            </div>
+                        )}
                         {messages.map((message) => (
-                            <MessageBubble
+                            <MessageRow
                                 key={message.id}
                                 message={message}
                                 isOwnMessage={message.senderId === currentUserId}
@@ -152,7 +195,7 @@ export const ChatPanel = ({
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
-                <div className="flux-composer">
+                <form className="flux-composer" onSubmit={handleSubmit}>
                     <button type="button" className="flux-composer-action" aria-label="Add attachment">
                         <Plus size={20} strokeWidth={1.8} aria-hidden="true" />
                     </button>
@@ -161,14 +204,27 @@ export const ChatPanel = ({
                         className="flux-composer-input"
                         placeholder={`Message ${conversationUser.name}...`}
                         aria-label={`Message ${conversationUser.name}`}
+                        value={content}
+                        onChange={(event) => setContent(event.target.value)}
+                        disabled={isSending}
                     />
                     <button type="button" className="flux-composer-emoji" aria-label="Choose emoji">
                         <Smile size={18} strokeWidth={1.8} aria-hidden="true" />
                     </button>
-                    <button type="button" className="flux-composer-send" aria-label="Send message">
+                    <button
+                        type="submit"
+                        className="flux-composer-send cursor-pointer"
+                        aria-label="Send message"
+                        disabled={isSending || !content.trim()}
+                    >
                         <SendHorizontal size={17} strokeWidth={1.8} aria-hidden="true" />
                     </button>
-                </div>
+                </form>
+                {sendError && (
+                    <p className="mt-2 text-center text-xs text-rose-600 dark:text-rose-300" role="alert">
+                        {sendError}
+                    </p>
+                )}
             </footer>
         </section>
     );

@@ -22,14 +22,49 @@ type MessagesResponse = {
     nextCursor: string | null;
 };
 
-// Загружаем первую страницу истории: backend сам применяет limit по умолчанию.
-export const getMessages = async (conversationId: string, accessToken: string, signal?: AbortSignal) => {
-    const response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
+export type MessagesPage = {
+    messages: Message[];
+    nextCursor: string | null;
+    hasMore: boolean;
+};
+
+type SendMessageResponse = {
+    message: Message;
+};
+
+type GetMessagesOptions = {
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+};
+
+// Без cursor загружаем первую страницу, с cursor — более старые сообщения.
+export const getMessages = async (
+    conversationId: string,
+    accessToken: string,
+    { cursor, limit, signal }: GetMessagesOptions = {},
+): Promise<MessagesPage> => {
+    // формируем query параметры в url
+    const query = new URLSearchParams();
+
+    if (cursor) {
+        query.set("cursor", cursor);
+    }
+
+    if (limit) {
+        query.set("limit", String(limit)); // в бэкэнде лимит от 30 до 50
+    }
+
+    const queryString = query.toString();
+    const response = await fetch(
+        `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
+        {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+            signal,
         },
-        signal,
-    });
+    );
 
     if (!response.ok) {
         let message = "Failed to load messages";
@@ -46,5 +81,38 @@ export const getMessages = async (conversationId: string, accessToken: string, s
 
     const data = (await response.json()) as MessagesResponse;
 
-    return data.messages;
+    return {
+        messages: data.messages,
+        nextCursor: data.nextCursor,
+        // Backend возвращает nextCursor только если у истории есть следующая страница.
+        hasMore: data.nextCursor !== null,
+    };
+};
+
+export const sendMessage = async (conversationId: string, content: string, accessToken: string) => {
+    const response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+        let message = "Failed to send message";
+
+        try {
+            const body = (await response.json()) as { error?: string };
+            message = body.error ?? message;
+        } catch {
+            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
+        }
+
+        throw new Error(message);
+    }
+
+    const data = (await response.json()) as SendMessageResponse;
+
+    return data.message;
 };
