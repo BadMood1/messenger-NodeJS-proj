@@ -16,8 +16,8 @@ Content-Type: application/json
 
 {
   "name": "Andrei",
-  "username": "andrei",
-  "email": "andrei@example.com",
+  "username": "badmood",
+  "email": "andrew@example.com",
   "password": "password123"
 }
 
@@ -29,7 +29,7 @@ POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
 {
-  "identifier": "andrei",
+  "identifier": "badmood",
   "password": "password123"
 }
 

@@ -1,5 +1,6 @@
 import express from "express";
 import { prisma } from "./lib/prisma.js";
+import cors from "cors";
 import authRouter from "./routes/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import cookieParser from "cookie-parser";
@@ -8,6 +9,14 @@ import { friendRouter } from "./routes/friend.routes.js";
 import { conversationRouter } from "./routes/conversation.routes.js";
 
 const app = express();
+
+// Разрешаем нашему frontend отправлять запросы и cookies
+app.use(
+    cors({
+        origin: "http://localhost:5173",
+        credentials: true, // Разрешаем отправку cookies
+    }),
+);
 
 app.use(express.json());
 app.use(cookieParser());
