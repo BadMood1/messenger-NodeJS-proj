@@ -7,10 +7,9 @@ type UseConversationMessagesOptions = {
     accessToken: string | null;
 };
 
-export const useConversationMessages = ({
-    conversationId,
-    accessToken,
-}: UseConversationMessagesOptions) => {
+export const useConversationMessages = ({ conversationId, accessToken }: UseConversationMessagesOptions) => {
+    // Показывает, какому чату принадлежат сообщ-я, находящиеся сейчас в messages.
+    // Чтобы не показывать с другого чата при смене его
     const [historyConversationId, setHistoryConversationId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [messagesLoading, setMessagesLoading] = useState(false);
@@ -21,21 +20,29 @@ export const useConversationMessages = ({
     const [isLoadingOlder, setIsLoadingOlder] = useState(false);
     const [olderMessagesError, setOlderMessagesError] = useState<string | null>(null);
 
-    const conversationIdRef = useRef(conversationId);
-    const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-    const loadOlderControllerRef = useRef<AbortController | null>(null);
-    const isLoadingOlderRef = useRef(false);
+    const conversationIdRef = useRef(conversationId); // актуальный ID
+    const messagesContainerRef = useRef<HTMLDivElement | null>(null); // DOM-эл списка сообщений
+    const loadOlderControllerRef = useRef<AbortController | null>(null); // хранит контроллер для отмены запроса
+    const isLoadingOlderRef = useRef(false); // хранит состояние загрузки старых сообщений, чтобы не гонять несколько запросов одновременно
+    // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
+    const shouldScrollToBottomRef = useRef(false);
+    // сохр. положение скролла перед добавлением старых сообщ. сверху
     const prependScrollRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
-    // Async-ответы всегда сверяются с id, актуальным на последнем рендере.
+    // useLayoutEffect выполняется раньше обычного useEffect — сразу после того, как
+    // React применил изменения в DOM, но до того, как браузер покажет кадр.
     useLayoutEffect(() => {
         conversationIdRef.current = conversationId;
     }, [conversationId]);
 
+    // Первая страница сообщений
     useEffect(() => {
         loadOlderControllerRef.current?.abort();
         loadOlderControllerRef.current = null;
         isLoadingOlderRef.current = false;
+        // Новый чат должен дождаться собственной первой страницы перед прокруткой вниз.
+        shouldScrollToBottomRef.current = false;
+        // Сохран. положение скролла перед загрузкой старых сообщ. сверху
         prependScrollRef.current = null;
 
         if (!conversationId || !accessToken) {
@@ -61,6 +68,8 @@ export const useConversationMessages = ({
                 });
 
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
+                    // Первую страницу показываем с самых новых сообщений внизу.
+                    shouldScrollToBottomRef.current = true;
                     setMessages(result.messages);
                     setNextCursor(result.nextCursor);
                     setHasMore(result.hasMore);
@@ -86,12 +95,25 @@ export const useConversationMessages = ({
         };
     }, [accessToken, conversationId]);
 
-    // После prepend восстанавливаем прежнюю видимую область до отрисовки кадра.
+    // Выставляем нужную позицию до отрисовки кадра, чтобы скролл не прыгал.
     useLayoutEffect(() => {
-        const previousScroll = prependScrollRef.current;
         const container = messagesContainerRef.current;
 
-        if (!previousScroll || !container) {
+        if (!container) {
+            return;
+        }
+
+        // После initial load DOM уже знает полную высоту первой страницы.
+        if (shouldScrollToBottomRef.current) {
+            container.scrollTop = container.scrollHeight;
+            // Следующие изменения messages не должны снова переносить пользователя вниз.
+            shouldScrollToBottomRef.current = false;
+            return;
+        }
+
+        const previousScroll = prependScrollRef.current;
+
+        if (!previousScroll) {
             return;
         }
 
@@ -100,6 +122,7 @@ export const useConversationMessages = ({
         prependScrollRef.current = null;
     }, [messages]);
 
+    // Вызываем из ChatPanel при скролле
     const handleMessagesScroll = () => {
         const container = messagesContainerRef.current;
         const currentConversationId = conversationIdRef.current;
@@ -136,28 +159,20 @@ export const useConversationMessages = ({
                     signal: controller.signal,
                 });
 
-                if (
-                    controller.signal.aborted ||
-                    conversationIdRef.current !== currentConversationId
-                ) {
+                if (controller.signal.aborted || conversationIdRef.current !== currentConversationId) {
                     return;
                 }
 
                 setMessages((currentMessages) => {
                     const currentIds = new Set(currentMessages.map((message) => message.id));
-                    const olderMessages = result.messages.filter(
-                        (message) => !currentIds.has(message.id),
-                    );
+                    const olderMessages = result.messages.filter((message) => !currentIds.has(message.id));
 
                     return [...olderMessages, ...currentMessages];
                 });
                 setNextCursor(result.nextCursor);
                 setHasMore(result.hasMore);
             } catch (requestError) {
-                if (
-                    !controller.signal.aborted &&
-                    conversationIdRef.current === currentConversationId
-                ) {
+                if (!controller.signal.aborted && conversationIdRef.current === currentConversationId) {
                     setOlderMessagesError(
                         requestError instanceof Error
                             ? requestError.message
@@ -193,13 +208,13 @@ export const useConversationMessages = ({
         }
     };
 
+    // Если сменился чат, то временно возвр. пустой массив (в return условие)
     const isCurrentHistory =
         Boolean(conversationId && accessToken) && historyConversationId === conversationId;
 
     return {
         messages: isCurrentHistory ? messages : [],
-        messagesLoading:
-            Boolean(conversationId && accessToken) && (!isCurrentHistory || messagesLoading),
+        messagesLoading: Boolean(conversationId && accessToken) && (!isCurrentHistory || messagesLoading),
         messagesError: isCurrentHistory ? messagesError : null,
         isLoadingOlder: isCurrentHistory && isLoadingOlder,
         olderMessagesError: isCurrentHistory ? olderMessagesError : null,

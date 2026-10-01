@@ -30,9 +30,7 @@ export const useConversations = (accessToken: string | null) => {
                 // Отмена ожидаема при смене токена или уходе со страницы.
                 if (!controller.signal.aborted) {
                     setError(
-                        requestError instanceof Error
-                            ? requestError.message
-                            : "Failed to load conversations",
+                        requestError instanceof Error ? requestError.message : "Failed to load conversations",
                     );
                 }
             } finally {
@@ -45,7 +43,7 @@ export const useConversations = (accessToken: string | null) => {
         void loadConversations();
 
         return () => {
-            controller.abort();
+            controller.abort(); // Cleanup отменяет запрос при смене токена или уходе со страницы.
         };
     }, [accessToken]);
 

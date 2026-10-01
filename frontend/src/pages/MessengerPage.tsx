@@ -11,10 +11,13 @@ export const MessengerPage = () => {
     const { user, accessToken } = useAuth();
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
+    // Берём данные о диалогах из нашего хука
     const { conversations, loading, error } = useConversations(accessToken);
+    // Находим полный объект по выбранному id
     const selectedConversation =
         conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
 
+    // Данные сообщений из хука
     const {
         messages,
         messagesLoading,

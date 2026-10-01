@@ -24,15 +24,12 @@ type GetConversationsOptions = {
 };
 
 // Загружаем доступные текущему пользователю DIRECT-диалоги.
-export const getConversations = async (
-    accessToken: string,
-    { signal }: GetConversationsOptions = {},
-) => {
+export const getConversations = async (accessToken: string, { signal }: GetConversationsOptions = {}) => {
     const response = await fetch(`${API_URL}/conversations`, {
         headers: {
             Authorization: `Bearer ${accessToken}`,
         },
-        signal,
+        signal, // нужен для отмены запроса при смене токена или уходе со страницы
     });
 
     if (!response.ok) {
