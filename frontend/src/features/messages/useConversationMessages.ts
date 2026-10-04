@@ -1,13 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { getMessages, sendMessage as sendMessageRequest, type Message } from "./messages.api";
 
 type UseConversationMessagesOptions = {
     conversationId: string | null;
-    accessToken: string | null;
+    enabled: boolean;
+    authenticatedRequest: AuthenticatedRequest;
 };
 
-export const useConversationMessages = ({ conversationId, accessToken }: UseConversationMessagesOptions) => {
+export const useConversationMessages = ({
+    conversationId,
+    enabled,
+    authenticatedRequest,
+}: UseConversationMessagesOptions) => {
     // Показывает, какому чату принадлежат сообщ-я, находящиеся сейчас в messages.
     // Чтобы не показывать с другого чата при смене его
     const [historyConversationId, setHistoryConversationId] = useState<string | null>(null);
@@ -45,7 +51,7 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
         // Сохран. положение скролла перед загрузкой старых сообщ. сверху
         prependScrollRef.current = null;
 
-        if (!conversationId || !accessToken) {
+        if (!conversationId || !enabled) {
             return;
         }
 
@@ -63,7 +69,7 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
             setMessagesLoading(true);
 
             try {
-                const result = await getMessages(conversationId, accessToken, {
+                const result = await getMessages(conversationId, authenticatedRequest, {
                     signal: controller.signal,
                 });
 
@@ -93,7 +99,7 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
             controller.abort();
             loadOlderControllerRef.current?.abort();
         };
-    }, [accessToken, conversationId]);
+    }, [authenticatedRequest, conversationId, enabled]);
 
     // Выставляем нужную позицию до отрисовки кадра, чтобы скролл не прыгал.
     useLayoutEffect(() => {
@@ -134,7 +140,7 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
             !hasMore ||
             !nextCursor ||
             isLoadingOlderRef.current ||
-            !accessToken ||
+            !enabled ||
             container.scrollTop > 80
         ) {
             return;
@@ -154,7 +160,7 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
 
         const loadOlderMessages = async () => {
             try {
-                const result = await getMessages(currentConversationId, accessToken, {
+                const result = await getMessages(currentConversationId, authenticatedRequest, {
                     cursor: nextCursor,
                     signal: controller.signal,
                 });
@@ -196,11 +202,15 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
     const sendMessage = async (content: string) => {
         const currentConversationId = conversationIdRef.current;
 
-        if (!currentConversationId || !accessToken) {
+        if (!currentConversationId || !enabled) {
             throw new Error("No conversation selected");
         }
 
-        const message = await sendMessageRequest(currentConversationId, content, accessToken);
+        const message = await sendMessageRequest(
+            currentConversationId,
+            content,
+            authenticatedRequest,
+        );
 
         // Ответ старого POST не добавляем, если пользователь уже сменил чат.
         if (conversationIdRef.current === currentConversationId) {
@@ -210,11 +220,11 @@ export const useConversationMessages = ({ conversationId, accessToken }: UseConv
 
     // Если сменился чат, то временно возвр. пустой массив (в return условие)
     const isCurrentHistory =
-        Boolean(conversationId && accessToken) && historyConversationId === conversationId;
+        Boolean(conversationId && enabled) && historyConversationId === conversationId;
 
     return {
         messages: isCurrentHistory ? messages : [],
-        messagesLoading: Boolean(conversationId && accessToken) && (!isCurrentHistory || messagesLoading),
+        messagesLoading: Boolean(conversationId && enabled) && (!isCurrentHistory || messagesLoading),
         messagesError: isCurrentHistory ? messagesError : null,
         isLoadingOlder: isCurrentHistory && isLoadingOlder,
         olderMessagesError: isCurrentHistory ? olderMessagesError : null,
