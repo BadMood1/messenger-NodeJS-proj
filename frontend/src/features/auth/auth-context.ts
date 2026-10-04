@@ -1,5 +1,6 @@
 import { createContext } from "react";
 
+import type { AuthenticatedRequest } from "./authenticated-request";
 import type { User } from "./auth.api";
 
 export type AuthContextValue = {
@@ -7,6 +8,7 @@ export type AuthContextValue = {
     accessToken: string | null;
     loading: boolean;
     login: (identifier: string, password: string) => Promise<void>;
+    authenticatedRequest: AuthenticatedRequest;
 };
 
 // Сам Context выносим отдельно, чтобы AuthProvider.tsx

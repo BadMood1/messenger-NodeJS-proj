@@ -8,11 +8,15 @@ import { useConversations } from "../features/conversations/useConversations";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
 
 export const MessengerPage = () => {
-    const { user, accessToken } = useAuth();
+    const { user, accessToken, authenticatedRequest } = useAuth();
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+    const isAuthenticated = Boolean(accessToken);
 
     // Берём данные о диалогах из нашего хука
-    const { conversations, loading, error } = useConversations(accessToken);
+    const { conversations, loading, error } = useConversations({
+        enabled: isAuthenticated,
+        authenticatedRequest,
+    });
     // Находим полный объект по выбранному id
     const selectedConversation =
         conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
@@ -29,7 +33,8 @@ export const MessengerPage = () => {
         sendMessage,
     } = useConversationMessages({
         conversationId: selectedConversationId,
-        accessToken,
+        enabled: isAuthenticated,
+        authenticatedRequest,
     });
 
     const handleSelectConversation = (conversationId: string) => {

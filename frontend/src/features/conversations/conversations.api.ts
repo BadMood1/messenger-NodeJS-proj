@@ -1,4 +1,5 @@
 import { API_URL } from "../../lib/config";
+import type { AuthenticatedRequest } from "../auth/authenticated-request";
 
 export type ConversationUser = {
     id: string;
@@ -24,11 +25,11 @@ type GetConversationsOptions = {
 };
 
 // Загружаем доступные текущему пользователю DIRECT-диалоги.
-export const getConversations = async (accessToken: string, { signal }: GetConversationsOptions = {}) => {
-    const response = await fetch(`${API_URL}/conversations`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+export const getConversations = async (
+    authenticatedRequest: AuthenticatedRequest,
+    { signal }: GetConversationsOptions = {},
+) => {
+    const response = await authenticatedRequest(`${API_URL}/conversations`, {
         signal, // нужен для отмены запроса при смене токена или уходе со страницы
     });
 

@@ -1,4 +1,5 @@
 import { API_URL } from "../../lib/config";
+import type { AuthenticatedRequest } from "../auth/authenticated-request";
 
 export type MessageSender = {
     id: string;
@@ -41,7 +42,7 @@ type GetMessagesOptions = {
 // Без cursor загружаем первую страницу, с cursor — более старые сообщения.
 export const getMessages = async (
     conversationId: string,
-    accessToken: string,
+    authenticatedRequest: AuthenticatedRequest,
     { cursor, limit, signal }: GetMessagesOptions = {},
 ): Promise<MessagesPage> => {
     // формируем query параметры в url
@@ -56,12 +57,9 @@ export const getMessages = async (
     }
 
     const queryString = query.toString();
-    const response = await fetch(
+    const response = await authenticatedRequest(
         `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
         {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-            },
             signal,
         },
     );
@@ -89,12 +87,15 @@ export const getMessages = async (
     };
 };
 
-export const sendMessage = async (conversationId: string, content: string, accessToken: string) => {
-    const response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {
+export const sendMessage = async (
+    conversationId: string,
+    content: string,
+    authenticatedRequest: AuthenticatedRequest,
+) => {
+    const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ content }),
     });

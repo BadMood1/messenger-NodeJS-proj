@@ -1,14 +1,20 @@
 import { useEffect, useState } from "react";
 
+import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { getConversations, type Conversation } from "./conversations.api";
 
-export const useConversations = (accessToken: string | null) => {
+type UseConversationsOptions = {
+    enabled: boolean;
+    authenticatedRequest: AuthenticatedRequest;
+};
+
+export const useConversations = ({ enabled, authenticatedRequest }: UseConversationsOptions) => {
     const [conversations, setConversations] = useState<Conversation[]>([]);
-    const [loading, setLoading] = useState(Boolean(accessToken));
+    const [loading, setLoading] = useState(enabled);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!accessToken) {
+        if (!enabled) {
             return;
         }
 
@@ -19,7 +25,7 @@ export const useConversations = (accessToken: string | null) => {
             setError(null);
 
             try {
-                const result = await getConversations(accessToken, {
+                const result = await getConversations(authenticatedRequest, {
                     signal: controller.signal,
                 });
 
@@ -45,12 +51,12 @@ export const useConversations = (accessToken: string | null) => {
         return () => {
             controller.abort(); // Cleanup отменяет запрос при смене токена или уходе со страницы.
         };
-    }, [accessToken]);
+    }, [authenticatedRequest, enabled]);
 
     // После выхода не показываем данные, оставшиеся в памяти от прошлого токена.
     return {
-        conversations: accessToken ? conversations : [],
-        loading: Boolean(accessToken) && loading,
-        error: accessToken ? error : null,
+        conversations: enabled ? conversations : [],
+        loading: enabled && loading,
+        error: enabled ? error : null,
     };
 };
