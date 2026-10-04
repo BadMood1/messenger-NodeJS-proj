@@ -51,6 +51,7 @@ export const MessageBubble = ({
                 <div
                     tabIndex={0}
                     aria-label="Message actions"
+                    data-message-id={message.id}
                     className={`flux-message-placeholder focus-visible:outline-2 focus-visible:outline-blue-400 dark:focus-visible:outline-cyan-400 ${
                         isOwnMessage
                             ? "flux-message-placeholder-outgoing ml-auto"

@@ -38,8 +38,13 @@ export const useConversationMessages = ({
     const isLoadingOlderRef = useRef(false); // хранит состояние загрузки старых сообщений, чтобы не гонять несколько запросов одновременно
     // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
     const shouldScrollToBottomRef = useRef(false);
-    // сохр. положение скролла перед добавлением старых сообщ. сверху
-    const prependScrollRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+    // Снимок прямо перед prepend: сохраняем видимое сообщение и его положение на экране.
+    const prependScrollRef = useRef<{
+        anchor: HTMLElement | null;
+        offset: number;
+        scrollHeight: number;
+        scrollTop: number;
+    } | null>(null);
 
     // useLayoutEffect выполняется раньше обычного useEffect — сразу после того, как
     // React применил изменения в DOM, но до того, как браузер покажет кадр.
@@ -54,7 +59,7 @@ export const useConversationMessages = ({
         isLoadingOlderRef.current = false;
         // Новый чат должен дождаться собственной первой страницы перед прокруткой вниз.
         shouldScrollToBottomRef.current = false;
-        // Сохран. положение скролла перед загрузкой старых сообщ. сверху
+        // Снимок старого чата больше не нужен.
         prependScrollRef.current = null;
 
         if (!conversationId || !enabled) {
@@ -129,8 +134,16 @@ export const useConversationMessages = ({
             return;
         }
 
-        container.scrollTop =
-            previousScroll.scrollTop + (container.scrollHeight - previousScroll.scrollHeight);
+        if (previousScroll.anchor && container.contains(previousScroll.anchor)) {
+            // Возвращаем то же сообщение на ту же высоту, даже если у bubbles разные размеры.
+            const currentOffset =
+                previousScroll.anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            container.scrollTop += currentOffset - previousScroll.offset;
+        } else {
+            // Запасной вариант, если сообщение-якорь удалили вместе с другим обновлением.
+            container.scrollTop =
+                previousScroll.scrollTop + (container.scrollHeight - previousScroll.scrollHeight);
+        }
         prependScrollRef.current = null;
     }, [messages]);
 
@@ -156,11 +169,6 @@ export const useConversationMessages = ({
         loadOlderControllerRef.current = controller;
         isLoadingOlderRef.current = true;
 
-        // Сохраняем геометрию до prepend, чтобы затем восстановить позицию скролла.
-        prependScrollRef.current = {
-            scrollHeight: container.scrollHeight,
-            scrollTop: container.scrollTop,
-        };
         setIsLoadingOlder(true);
         setOlderMessagesError(null);
 
@@ -173,6 +181,26 @@ export const useConversationMessages = ({
 
                 if (controller.signal.aborted || conversationIdRef.current !== currentConversationId) {
                     return;
+                }
+
+                // За время запроса пользователь мог прокрутить дальше или отправить сообщение.
+                // Поэтому снимаем текущую геометрию только сейчас, перед изменением messages.
+                const container = messagesContainerRef.current;
+                if (container) {
+                    const { top, bottom } = container.getBoundingClientRect();
+                    const anchor =
+                        Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]")).find(
+                            (element) => {
+                                const rect = element.getBoundingClientRect();
+                                return rect.bottom > top && rect.top < bottom;
+                            },
+                        ) ?? null;
+                    prependScrollRef.current = {
+                        anchor,
+                        offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
+                        scrollHeight: container.scrollHeight,
+                        scrollTop: container.scrollTop,
+                    };
                 }
 
                 setMessages((currentMessages) => {
@@ -241,7 +269,10 @@ export const useConversationMessages = ({
                 currentMessages.map((currentMessage) => {
                     if (currentMessage.id === message.id) return message;
                     if (currentMessage.replyTo?.id === message.id) {
-                        return { ...currentMessage, replyTo: { ...currentMessage.replyTo, content: message.content } };
+                        return {
+                            ...currentMessage,
+                            replyTo: { ...currentMessage.replyTo, content: message.content },
+                        };
                     }
                     return currentMessage;
                 }),
@@ -262,16 +293,19 @@ export const useConversationMessages = ({
         if (conversationIdRef.current === currentConversationId) {
             setMessages((currentMessages) =>
                 // Повторяем ON DELETE SET NULL в уже загруженных reply previews.
-                currentMessages.filter((currentMessage) => currentMessage.id !== messageId).map((message) =>
-                    message.replyToId === messageId ? { ...message, replyToId: null, replyTo: null } : message,
-                ),
+                currentMessages
+                    .filter((currentMessage) => currentMessage.id !== messageId)
+                    .map((message) =>
+                        message.replyToId === messageId
+                            ? { ...message, replyToId: null, replyTo: null }
+                            : message,
+                    ),
             );
         }
     };
 
     // Если сменился чат, то временно возвр. пустой массив (в return условие)
-    const isCurrentHistory =
-        Boolean(conversationId && enabled) && historyConversationId === conversationId;
+    const isCurrentHistory = Boolean(conversationId && enabled) && historyConversationId === conversationId;
 
     return {
         messages: isCurrentHistory ? messages : [],

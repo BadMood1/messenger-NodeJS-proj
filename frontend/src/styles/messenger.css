@@ -153,6 +153,8 @@
 
     .flux-chat-messages {
         @apply relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4 lg:px-8 lg:py-6;
+        /* Позицию при prepend восстанавливает наш хук, без второй коррекции браузером. */
+        overflow-anchor: none;
         scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
         scrollbar-width: thin;
     }
