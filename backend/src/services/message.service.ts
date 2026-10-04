@@ -1,7 +1,31 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
 
-export const sendMessage = async (conversationId: string, senderId: string, content: string) => {
+// Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
+const messageInclude = {
+    sender: {
+        select: {
+            id: true,
+            name: true,
+            username: true,
+            image: true,
+        },
+    },
+    replyTo: {
+        select: {
+            id: true,
+            content: true,
+            sender: { select: { id: true, name: true, username: true } },
+        },
+    },
+} as const;
+
+export const sendMessage = async (
+    conversationId: string,
+    senderId: string,
+    content: string,
+    replyToId?: string,
+) => {
     // Проверяем, что пользователь вообще состоит в этом чате
     const member = await prisma.conversationMember.findUnique({
         where: {
@@ -16,25 +40,28 @@ export const sendMessage = async (conversationId: string, senderId: string, cont
         throw new AppError(403, "You are not a member of this conversation");
     }
 
+    if (replyToId) {
+        // Не позволяем цитировать сообщения из другого чата, даже зная их id.
+        const replyTo = await prisma.message.findFirst({
+            where: { id: replyToId, conversationId },
+            select: { id: true },
+        });
+        if (!replyTo) {
+            throw new AppError(400, "Reply message must belong to this conversation");
+        }
+    }
+
     // Создаём само сообщение
     return prisma.message.create({
         data: {
             content,
             senderId,
             conversationId,
+            replyToId: replyToId ?? null,
         },
 
         // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
-        include: {
-            sender: {
-                select: {
-                    id: true,
-                    name: true,
-                    username: true,
-                    image: true,
-                },
-            },
-        },
+        include: messageInclude,
     });
 };
 
@@ -77,16 +104,7 @@ export const getMessages = async (conversationId: string, userId: string, cursor
             skip: 1,
         }),
 
-        include: {
-            sender: {
-                select: {
-                    id: true,
-                    name: true,
-                    username: true,
-                    image: true,
-                },
-            },
-        },
+        include: messageInclude,
     });
 
     // Если получили больше limit — значит история ещё есть
@@ -136,16 +154,7 @@ export const editMessage = async (messageId: string, userId: string, content: st
             content,
         },
 
-        include: {
-            sender: {
-                select: {
-                    id: true,
-                    name: true,
-                    username: true,
-                    image: true,
-                },
-            },
-        },
+        include: messageInclude,
     });
 };
 

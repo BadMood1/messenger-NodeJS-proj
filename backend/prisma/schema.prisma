@@ -115,8 +115,14 @@ model Message {
   // В каком чате находится сообщение
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  // Удаление исходного сообщения не удаляет ответы на него.
+  replyToId String? // id сообщ. на которое отвечаем
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[] @relation("MessageReplies")
+
   // Главный индекс для загрузки истории конкретного чата
   @@index([conversationId, createdAt])
 
   @@index([senderId])
+  @@index([replyToId])
 }

@@ -14,9 +14,9 @@ export const createMessage = async (req: Request<{ conversationId: string }>, re
     const conversationId = req.params.conversationId;
 
     // Проверяем body и получаем уже очищенный content
-    const { content } = sendMessageSchema.parse(req.body);
+    const { content, replyToId } = sendMessageSchema.parse(req.body);
 
-    const message = await sendMessage(conversationId, senderId, content);
+    const message = await sendMessage(conversationId, senderId, content, replyToId);
 
     return res.status(201).json({
         message,

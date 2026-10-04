@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { getMessages, sendMessage as sendMessageRequest, type Message } from "./messages.api";
+import {
+    deleteMessage as deleteMessageRequest,
+    editMessage as editMessageRequest,
+    getMessages,
+    sendMessage as sendMessageRequest,
+    type Message,
+} from "./messages.api";
 
 type UseConversationMessagesOptions = {
     conversationId: string | null;
@@ -199,7 +205,7 @@ export const useConversationMessages = ({
         void loadOlderMessages();
     };
 
-    const sendMessage = async (content: string) => {
+    const sendMessage = async (content: string, replyToId?: string) => {
         const currentConversationId = conversationIdRef.current;
 
         if (!currentConversationId || !enabled) {
@@ -210,11 +216,56 @@ export const useConversationMessages = ({
             currentConversationId,
             content,
             authenticatedRequest,
+            replyToId,
         );
 
         // Ответ старого POST не добавляем, если пользователь уже сменил чат.
         if (conversationIdRef.current === currentConversationId) {
             setMessages((currentMessages) => [...currentMessages, message]);
+        }
+    };
+
+    const editMessage = async (messageId: string, content: string) => {
+        const currentConversationId = conversationIdRef.current;
+
+        if (!currentConversationId || !enabled) {
+            throw new Error("No conversation selected");
+        }
+
+        const message = await editMessageRequest(messageId, content, authenticatedRequest);
+
+        // PATCH старого чата не должен менять сообщения в уже открытом новом чате.
+        if (conversationIdRef.current === currentConversationId) {
+            // Обновляем также цитаты этого сообщения, чтобы они совпадали с будущим GET.
+            setMessages((currentMessages) =>
+                currentMessages.map((currentMessage) => {
+                    if (currentMessage.id === message.id) return message;
+                    if (currentMessage.replyTo?.id === message.id) {
+                        return { ...currentMessage, replyTo: { ...currentMessage.replyTo, content: message.content } };
+                    }
+                    return currentMessage;
+                }),
+            );
+        }
+    };
+
+    const deleteMessage = async (messageId: string) => {
+        const currentConversationId = conversationIdRef.current;
+
+        if (!currentConversationId || !enabled) {
+            throw new Error("No conversation selected");
+        }
+
+        await deleteMessageRequest(messageId, authenticatedRequest);
+
+        // DELETE старого чата не должен менять сообщения в уже открытом новом чате.
+        if (conversationIdRef.current === currentConversationId) {
+            setMessages((currentMessages) =>
+                // Повторяем ON DELETE SET NULL в уже загруженных reply previews.
+                currentMessages.filter((currentMessage) => currentMessage.id !== messageId).map((message) =>
+                    message.replyToId === messageId ? { ...message, replyToId: null, replyTo: null } : message,
+                ),
+            );
         }
     };
 
@@ -231,5 +282,7 @@ export const useConversationMessages = ({
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        editMessage,
+        deleteMessage,
     };
 };

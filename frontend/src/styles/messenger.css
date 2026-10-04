@@ -192,6 +192,10 @@
         overflow-wrap: anywhere;
     }
 
+    .flux-reply-preview {
+        @apply rounded-lg border-l-2 border-blue-400/70 bg-blue-400/8 px-2.5 py-1.5 text-xs leading-4 text-blue-700 dark:border-cyan-300/50 dark:bg-cyan-300/5 dark:text-cyan-200;
+    }
+
     .flux-message-placeholder-incoming {
         @apply rounded-bl-md border border-white/70 bg-slate-200/72 text-slate-700 shadow-slate-200/45 dark:border-white/5 dark:bg-[#13243a] dark:text-slate-200 dark:shadow-none;
     }

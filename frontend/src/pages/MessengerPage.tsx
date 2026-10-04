@@ -31,6 +31,8 @@ export const MessengerPage = () => {
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        editMessage,
+        deleteMessage,
     } = useConversationMessages({
         conversationId: selectedConversationId,
         enabled: isAuthenticated,
@@ -46,6 +48,20 @@ export const MessengerPage = () => {
     // ESC закрывает выбранный чат; message hook сам очистит его историю.
     useEffect(() => {
         const closeConversationOnEscape = (event: KeyboardEvent) => {
+            // Если Escape обработал другой UI-эл. или внутри menu|dialog'а, то чат не закрываем
+            if (
+                event.defaultPrevented ||
+                event
+                    .composedPath()
+                    // смотрим цепочку событий и проверяем есть ли среди них элементы с:
+                    .some(
+                        (target) =>
+                            target instanceof Element &&
+                            target.matches('[role="menu"], [role="alertdialog"]'),
+                    )
+            )
+                return;
+
             if (event.key === "Escape") {
                 setSelectedConversationId(null);
             }
@@ -83,6 +99,8 @@ export const MessengerPage = () => {
                 messagesError={messagesError}
                 currentUserId={user?.id ?? null}
                 onSendMessage={sendMessage}
+                onEditMessage={editMessage}
+                onDeleteMessage={deleteMessage}
                 messagesContainerRef={messagesContainerRef}
                 onMessagesScroll={handleMessagesScroll}
                 isLoadingOlder={isLoadingOlder}
