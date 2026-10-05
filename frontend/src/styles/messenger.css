@@ -208,6 +208,12 @@
         @apply rounded-br-md border border-blue-200/55 bg-linear-to-br from-blue-100 via-blue-200/85 to-sky-200/85 text-slate-800 shadow-blue-200/35 dark:border-blue-400/12 dark:from-blue-600/42 dark:via-blue-600/34 dark:to-cyan-600/26 dark:text-blue-50 dark:shadow-none;
     }
 
+    .flux-message-placeholder.flux-message-failed {
+        /* Лёгкий tint поверх исходного градиента, без замены цвета bubble. */
+        box-shadow: inset 0 0 0 100vmax rgb(244 63 94 / 7%);
+        border-color: rgb(244 63 94 / 25%);
+    }
+
     .flux-message-meta-spacer {
         display: inline-block;
         width: var(--flux-message-meta-space);

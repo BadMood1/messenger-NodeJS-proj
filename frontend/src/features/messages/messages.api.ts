@@ -29,6 +29,12 @@ type MessagesResponse = {
     nextCursor: string | null;
 };
 
+// Только клиентский статус: backend и cursor работают с обычными Message.
+export type ClientMessage = Message & {
+    localStatus?: "sending" | "failed";
+    sendError?: string;
+};
+
 export type MessagesPage = {
     messages: Message[];
     nextCursor: string | null;
