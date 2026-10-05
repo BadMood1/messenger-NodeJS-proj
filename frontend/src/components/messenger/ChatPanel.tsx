@@ -1,4 +1,5 @@
 import {
+    ArrowLeft,
     Check,
     MessageCircleMore,
     MoreHorizontal,
@@ -37,6 +38,7 @@ type ChatPanelProps = {
     onMessagesScroll: () => void;
     isLoadingOlder: boolean;
     olderMessagesError: string | null;
+    onBack: () => void;
 };
 
 const getInitials = (name: string) => {
@@ -61,6 +63,7 @@ export const ChatPanel = ({
     onMessagesScroll,
     isLoadingOlder,
     olderMessagesError,
+    onBack,
 }: ChatPanelProps) => {
     const conversationUser = conversation?.user;
 
@@ -213,7 +216,10 @@ export const ChatPanel = ({
             }
         }}>
             <header className="flux-chat-header">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 max-lg:min-w-0 max-lg:gap-2">
+                    <button type="button" className="flux-icon-button lg:hidden" aria-label="Back to conversations" onClick={onBack}>
+                        <ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" />
+                    </button>
                     <div className="flux-chat-avatar overflow-hidden">
                         {conversationUser.image ? (
                             <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
@@ -221,18 +227,18 @@ export const ChatPanel = ({
                             getInitials(conversationUser.name) || "?"
                         )}
                     </div>
-                    <div>
-                        <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50">
+                    <div className="max-lg:min-w-0">
+                        <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 max-lg:truncate">
                             @{conversationUser.username}
                         </p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-1">
-                    <button type="button" className="flux-icon-button" aria-label="Search chat">
+                <div className="flex items-center gap-1 max-lg:shrink-0">
+                    <button type="button" className="flux-icon-button max-lg:hidden" aria-label="Search chat">
                         <Search size={19} strokeWidth={1.8} aria-hidden="true" />
                     </button>
                     <button type="button" className="flux-icon-button" aria-label="Call">
