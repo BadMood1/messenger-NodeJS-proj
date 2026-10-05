@@ -28,6 +28,17 @@ Authorization: Bearer {{accessToken}}
   "content": "Hello from the HTTP client"
 }
 
+### Reply to a message
+# messageId must belong to this conversation. Returns message.replyTo: { id, content, sender }.
+POST {{baseUrl}}/api/conversations/{{conversationId}}/messages
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "content": "Reply from the HTTP client",
+  "replyToId": "{{messageId}}"
+}
+
 ### Get latest messages
 # limit is 1-50 and defaults to 30. The response includes messages and nextCursor.
 GET {{baseUrl}}/api/conversations/{{conversationId}}/messages?limit=30

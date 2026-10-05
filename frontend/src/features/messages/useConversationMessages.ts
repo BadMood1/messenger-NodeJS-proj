@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { getMessages, sendMessage as sendMessageRequest, type Message } from "./messages.api";
+import {
+    deleteMessage as deleteMessageRequest,
+    editMessage as editMessageRequest,
+    getMessages,
+    sendMessage as sendMessageRequest,
+    type Message,
+} from "./messages.api";
 
 type UseConversationMessagesOptions = {
     conversationId: string | null;
@@ -32,8 +38,13 @@ export const useConversationMessages = ({
     const isLoadingOlderRef = useRef(false); // хранит состояние загрузки старых сообщений, чтобы не гонять несколько запросов одновременно
     // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
     const shouldScrollToBottomRef = useRef(false);
-    // сохр. положение скролла перед добавлением старых сообщ. сверху
-    const prependScrollRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+    // Снимок прямо перед prepend: сохраняем видимое сообщение и его положение на экране.
+    const prependScrollRef = useRef<{
+        anchor: HTMLElement | null;
+        offset: number;
+        scrollHeight: number;
+        scrollTop: number;
+    } | null>(null);
 
     // useLayoutEffect выполняется раньше обычного useEffect — сразу после того, как
     // React применил изменения в DOM, но до того, как браузер покажет кадр.
@@ -48,7 +59,7 @@ export const useConversationMessages = ({
         isLoadingOlderRef.current = false;
         // Новый чат должен дождаться собственной первой страницы перед прокруткой вниз.
         shouldScrollToBottomRef.current = false;
-        // Сохран. положение скролла перед загрузкой старых сообщ. сверху
+        // Снимок старого чата больше не нужен.
         prependScrollRef.current = null;
 
         if (!conversationId || !enabled) {
@@ -123,8 +134,16 @@ export const useConversationMessages = ({
             return;
         }
 
-        container.scrollTop =
-            previousScroll.scrollTop + (container.scrollHeight - previousScroll.scrollHeight);
+        if (previousScroll.anchor && container.contains(previousScroll.anchor)) {
+            // Возвращаем то же сообщение на ту же высоту, даже если у bubbles разные размеры.
+            const currentOffset =
+                previousScroll.anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            container.scrollTop += currentOffset - previousScroll.offset;
+        } else {
+            // Запасной вариант, если сообщение-якорь удалили вместе с другим обновлением.
+            container.scrollTop =
+                previousScroll.scrollTop + (container.scrollHeight - previousScroll.scrollHeight);
+        }
         prependScrollRef.current = null;
     }, [messages]);
 
@@ -150,11 +169,6 @@ export const useConversationMessages = ({
         loadOlderControllerRef.current = controller;
         isLoadingOlderRef.current = true;
 
-        // Сохраняем геометрию до prepend, чтобы затем восстановить позицию скролла.
-        prependScrollRef.current = {
-            scrollHeight: container.scrollHeight,
-            scrollTop: container.scrollTop,
-        };
         setIsLoadingOlder(true);
         setOlderMessagesError(null);
 
@@ -167,6 +181,26 @@ export const useConversationMessages = ({
 
                 if (controller.signal.aborted || conversationIdRef.current !== currentConversationId) {
                     return;
+                }
+
+                // За время запроса пользователь мог прокрутить дальше или отправить сообщение.
+                // Поэтому снимаем текущую геометрию только сейчас, перед изменением messages.
+                const container = messagesContainerRef.current;
+                if (container) {
+                    const { top, bottom } = container.getBoundingClientRect();
+                    const anchor =
+                        Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]")).find(
+                            (element) => {
+                                const rect = element.getBoundingClientRect();
+                                return rect.bottom > top && rect.top < bottom;
+                            },
+                        ) ?? null;
+                    prependScrollRef.current = {
+                        anchor,
+                        offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
+                        scrollHeight: container.scrollHeight,
+                        scrollTop: container.scrollTop,
+                    };
                 }
 
                 setMessages((currentMessages) => {
@@ -199,7 +233,7 @@ export const useConversationMessages = ({
         void loadOlderMessages();
     };
 
-    const sendMessage = async (content: string) => {
+    const sendMessage = async (content: string, replyToId?: string) => {
         const currentConversationId = conversationIdRef.current;
 
         if (!currentConversationId || !enabled) {
@@ -210,6 +244,7 @@ export const useConversationMessages = ({
             currentConversationId,
             content,
             authenticatedRequest,
+            replyToId,
         );
 
         // Ответ старого POST не добавляем, если пользователь уже сменил чат.
@@ -218,9 +253,59 @@ export const useConversationMessages = ({
         }
     };
 
+    const editMessage = async (messageId: string, content: string) => {
+        const currentConversationId = conversationIdRef.current;
+
+        if (!currentConversationId || !enabled) {
+            throw new Error("No conversation selected");
+        }
+
+        const message = await editMessageRequest(messageId, content, authenticatedRequest);
+
+        // PATCH старого чата не должен менять сообщения в уже открытом новом чате.
+        if (conversationIdRef.current === currentConversationId) {
+            // Обновляем также цитаты этого сообщения, чтобы они совпадали с будущим GET.
+            setMessages((currentMessages) =>
+                currentMessages.map((currentMessage) => {
+                    if (currentMessage.id === message.id) return message;
+                    if (currentMessage.replyTo?.id === message.id) {
+                        return {
+                            ...currentMessage,
+                            replyTo: { ...currentMessage.replyTo, content: message.content },
+                        };
+                    }
+                    return currentMessage;
+                }),
+            );
+        }
+    };
+
+    const deleteMessage = async (messageId: string) => {
+        const currentConversationId = conversationIdRef.current;
+
+        if (!currentConversationId || !enabled) {
+            throw new Error("No conversation selected");
+        }
+
+        await deleteMessageRequest(messageId, authenticatedRequest);
+
+        // DELETE старого чата не должен менять сообщения в уже открытом новом чате.
+        if (conversationIdRef.current === currentConversationId) {
+            setMessages((currentMessages) =>
+                // Повторяем ON DELETE SET NULL в уже загруженных reply previews.
+                currentMessages
+                    .filter((currentMessage) => currentMessage.id !== messageId)
+                    .map((message) =>
+                        message.replyToId === messageId
+                            ? { ...message, replyToId: null, replyTo: null }
+                            : message,
+                    ),
+            );
+        }
+    };
+
     // Если сменился чат, то временно возвр. пустой массив (в return условие)
-    const isCurrentHistory =
-        Boolean(conversationId && enabled) && historyConversationId === conversationId;
+    const isCurrentHistory = Boolean(conversationId && enabled) && historyConversationId === conversationId;
 
     return {
         messages: isCurrentHistory ? messages : [],
@@ -231,5 +316,7 @@ export const useConversationMessages = ({
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        editMessage,
+        deleteMessage,
     };
 };

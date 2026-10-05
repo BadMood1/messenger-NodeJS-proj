@@ -16,6 +16,12 @@ export type Message = {
     senderId: string;
     conversationId: string;
     sender: MessageSender;
+    replyToId: string | null;
+    replyTo: {
+        id: string;
+        content: string;
+        sender: Pick<MessageSender, "id" | "name" | "username">;
+    } | null;
 };
 
 type MessagesResponse = {
@@ -30,6 +36,10 @@ export type MessagesPage = {
 };
 
 type SendMessageResponse = {
+    message: Message;
+};
+
+type EditMessageResponse = {
     message: Message;
 };
 
@@ -91,13 +101,14 @@ export const sendMessage = async (
     conversationId: string,
     content: string,
     authenticatedRequest: AuthenticatedRequest,
+    replyToId?: string,
 ) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, replyToId }),
     });
 
     if (!response.ok) {
@@ -116,4 +127,57 @@ export const sendMessage = async (
     const data = (await response.json()) as SendMessageResponse;
 
     return data.message;
+};
+
+export const editMessage = async (
+    messageId: string,
+    content: string,
+    authenticatedRequest: AuthenticatedRequest,
+) => {
+    const response = await authenticatedRequest(`${API_URL}/conversations/messages/${messageId}`, {
+        method: "PATCH",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+        let message = "Failed to edit message";
+
+        try {
+            const body = (await response.json()) as { error?: string };
+            message = body.error ?? message;
+        } catch {
+            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
+        }
+
+        throw new Error(message);
+    }
+
+    const data = (await response.json()) as EditMessageResponse;
+
+    return data.message;
+};
+
+export const deleteMessage = async (
+    messageId: string,
+    authenticatedRequest: AuthenticatedRequest,
+) => {
+    const response = await authenticatedRequest(`${API_URL}/conversations/messages/${messageId}`, {
+        method: "DELETE",
+    });
+
+    if (!response.ok) {
+        let message = "Failed to delete message";
+
+        try {
+            const body = (await response.json()) as { error?: string };
+            message = body.error ?? message;
+        } catch {
+            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
+        }
+
+        throw new Error(message);
+    }
 };

@@ -2,6 +2,85 @@
 @import "./styles/login.css";
 @import "./styles/messenger.css";
 
+@layer base {
+    button:not(:disabled) {
+        @apply cursor-pointer;
+    }
+
+    button:disabled {
+        @apply cursor-not-allowed;
+    }
+}
+
+@layer components {
+    .flux-popover-motion[data-state="open"] {
+        transform-origin: var(--radix-context-menu-content-transform-origin, center);
+        animation: flux-pop-in 120ms ease-out;
+    }
+
+    .flux-overlay-motion[data-state="open"] {
+        animation: flux-fade-in 120ms ease-out;
+    }
+
+    .flux-popover-motion[data-state="closed"] {
+        animation: flux-pop-out 100ms ease-in;
+    }
+
+    .flux-overlay-motion[data-state="closed"] {
+        animation: flux-fade-out 100ms ease-in;
+    }
+}
+
+@keyframes flux-pop-in {
+    from { opacity: 0; scale: 0.97; }
+    to { opacity: 1; scale: 1; }
+}
+
+@keyframes flux-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes flux-pop-out {
+    from { opacity: 1; scale: 1; }
+    to { opacity: 0; scale: 0.97; }
+}
+
+@keyframes flux-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* На touch даём обратную связь при удержании кнопок и сообщений. */
+@media (pointer: coarse) {
+    button:not(:disabled),
+    .flux-message-placeholder {
+        scale: 1;
+        transition: scale 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+    }
+
+    button:not(:disabled)[data-pressed="true"],
+    .flux-message-placeholder[data-pressed="true"] {
+        scale: 0.97;
+    }
+}
+
+/* Учитываем системное предпочтение уменьшить движение. */
+@media (prefers-reduced-motion: reduce) {
+    .flux-popover-motion[data-state],
+    .flux-overlay-motion[data-state] {
+        animation: none;
+    }
+
+    button:not(:disabled),
+    button:not(:disabled)[data-pressed="true"],
+    .flux-message-placeholder,
+    .flux-message-placeholder[data-pressed="true"] {
+        scale: 1;
+        transition: none;
+    }
+}
+
 html,
 body,
 #root {

@@ -105,8 +105,8 @@ export const ConversationSidebar = ({
 }: ConversationSidebarProps) => (
     <aside className="flux-conversation-sidebar">
         <header className="flux-conversation-header">
-            <div className="flex items-center gap-3 md:block">
-                <div className="h-10 w-10 shrink-0 md:hidden">
+            <div className="flex items-center gap-3 lg:block">
+                <div className="h-10 w-10 shrink-0 lg:hidden">
                     <img
                         src="/brand/logo-light.png"
                         alt="FLUX"
@@ -119,7 +119,7 @@ export const ConversationSidebar = ({
                     />
                 </div>
 
-                <h1 className="hidden text-xl font-semibold tracking-tight text-slate-900 dark:text-white md:block">
+                <h1 className="hidden text-xl font-semibold tracking-tight text-slate-900 dark:text-white lg:block">
                     Chats
                 </h1>
 
