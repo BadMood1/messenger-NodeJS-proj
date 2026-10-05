@@ -32,12 +32,14 @@ export const MessengerPage = () => {
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        retryMessage,
         editMessage,
         deleteMessage,
     } = useConversationMessages({
         conversationId: selectedConversationId,
         enabled: isAuthenticated,
         authenticatedRequest,
+        currentUser: user,
     });
 
     const handleSelectConversation = (conversationId: string) => {
@@ -117,6 +119,7 @@ export const MessengerPage = () => {
                 messagesError={messagesError}
                 currentUserId={user?.id ?? null}
                 onSendMessage={sendMessage}
+                onRetryMessage={retryMessage}
                 onEditMessage={editMessage}
                 onDeleteMessage={deleteMessage}
                 messagesContainerRef={messagesContainerRef}

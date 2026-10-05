@@ -7,23 +7,30 @@ import {
     getMessages,
     sendMessage as sendMessageRequest,
     type Message,
+    type ClientMessage,
+    type MessageSender,
 } from "./messages.api";
 
 type UseConversationMessagesOptions = {
     conversationId: string | null;
     enabled: boolean;
     authenticatedRequest: AuthenticatedRequest;
+    currentUser: MessageSender | null;
 };
 
 export const useConversationMessages = ({
     conversationId,
     enabled,
     authenticatedRequest,
+    currentUser,
 }: UseConversationMessagesOptions) => {
     // Показывает, какому чату принадлежат сообщ-я, находящиеся сейчас в messages.
     // Чтобы не показывать с другого чата при смене его
     const [historyConversationId, setHistoryConversationId] = useState<string | null>(null);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<ClientMessage[]>([]);
+    // Id сообщ., которые прямо сейчас отправляются
+    const sendingIdsRef = useRef(new Set<string>());
+    const historyVersionRef = useRef(0);
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [messagesError, setMessagesError] = useState<string | null>(null);
 
@@ -50,6 +57,7 @@ export const useConversationMessages = ({
     // React применил изменения в DOM, но до того, как браузер покажет кадр.
     useLayoutEffect(() => {
         conversationIdRef.current = conversationId;
+        historyVersionRef.current += 1;
     }, [conversationId]);
 
     // Первая страница сообщений
@@ -233,24 +241,98 @@ export const useConversationMessages = ({
         void loadOlderMessages();
     };
 
-    const sendMessage = async (content: string, replyToId?: string) => {
+    // выполняет POST и заменяет temp-сообщение на серверное, либо помечает его как failed.
+    const deliverMessage = async (pending: ClientMessage) => {
+        if (sendingIdsRef.current.has(pending.id)) return; // проверка повторной отправки, если пользователь быстро нажал кнопку несколько раз.
+        sendingIdsRef.current.add(pending.id);
+
+        const historyVersion = historyVersionRef.current;
+        // Проверяем и поколение чата: уйти и вернуться в тот же id тоже считается сменой истории.
+        const isCurrent = () =>
+            conversationIdRef.current === pending.conversationId &&
+            historyVersionRef.current === historyVersion;
+        try {
+            const message = await sendMessageRequest(
+                pending.conversationId,
+                pending.content,
+                authenticatedRequest,
+                pending.replyToId ?? undefined,
+            );
+            // Проверяем можно ли обновл. текущий чат
+            if (isCurrent()) {
+                // меняем state
+                setMessages(
+                    (current) =>
+                        current
+                            .filter((item) => item.id !== message.id || item.id === pending.id) // если вдруг message уже есть в списке, то не пропускаем дальше
+                            .map((item) => (item.id === pending.id ? message : item)), // заменяем temp на серверный id
+                );
+            }
+        } catch (error) {
+            if (isCurrent()) {
+                // меняем state
+                setMessages((current) =>
+                    current.map((item) =>
+                        item.id === pending.id // нашли наше временное сообщение
+                            ? {
+                                  ...item,
+                                  localStatus: "failed",
+                                  sendError:
+                                      error instanceof Error ? error.message : "Failed to send message",
+                              }
+                            : item,
+                    ),
+                );
+            }
+        } finally {
+            sendingIdsRef.current.delete(pending.id);
+        }
+    };
+
+    const sendMessage = (content: string, replyTo?: Message) => {
         const currentConversationId = conversationIdRef.current;
 
-        if (!currentConversationId || !enabled) {
+        if (!currentConversationId || !enabled || !currentUser) {
             throw new Error("No conversation selected");
         }
 
-        const message = await sendMessageRequest(
-            currentConversationId,
+        const now = new Date().toISOString();
+        // Создали объект сообщения с временным id, чтобы сразу показать его в списке.
+        const pending: ClientMessage = {
+            id: `temp:${crypto.randomUUID()}`,
             content,
-            authenticatedRequest,
-            replyToId,
-        );
+            createdAt: now,
+            updatedAt: now,
+            senderId: currentUser.id,
+            sender: currentUser,
+            conversationId: currentConversationId,
+            replyToId: replyTo?.id ?? null,
+            replyTo: replyTo ? { id: replyTo.id, content: replyTo.content, sender: replyTo.sender } : null,
+            localStatus: "sending",
+        };
+        shouldScrollToBottomRef.current = true; // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
+        setMessages((current) => [...current, pending]); // добавляем сообщ. в конец списка, чтобы сразу показать его в UI.
+        // Ошибки POST остаются в bubble, а composer можно сразу использовать снова.
+        void deliverMessage(pending); // асинхронно отправляем на сервер, не дожидаясь ответа.
+    };
 
-        // Ответ старого POST не добавляем, если пользователь уже сменил чат.
-        if (conversationIdRef.current === currentConversationId) {
-            setMessages((currentMessages) => [...currentMessages, message]);
-        }
+    const retryMessage = (messageId: string) => {
+        const pending = messages.find((message) => message.id === messageId);
+        if (!pending || pending.localStatus !== "failed" || sendingIdsRef.current.has(messageId)) return;
+        const now = new Date().toISOString();
+        const retried: ClientMessage = {
+            ...pending,
+            createdAt: now,
+            updatedAt: now,
+            localStatus: "sending",
+            sendError: undefined,
+        };
+        // Retry — новая попытка сейчас: переносим тот же temp вниз и сразу обновляем время.
+        shouldScrollToBottomRef.current = true;
+        setMessages((current) =>
+            [...current.filter((message) => message.id !== messageId), retried],
+        );
+        void deliverMessage(retried);
     };
 
     const editMessage = async (messageId: string, content: string) => {
@@ -282,6 +364,13 @@ export const useConversationMessages = ({
 
     const deleteMessage = async (messageId: string) => {
         const currentConversationId = conversationIdRef.current;
+
+        // Failed bubble существует только локально: temp id не отправляем в DELETE API.
+        if (messages.some((message) => message.id === messageId && message.localStatus === "failed")) {
+            if (sendingIdsRef.current.has(messageId)) return;
+            setMessages((current) => current.filter((message) => message.id !== messageId));
+            return;
+        }
 
         if (!currentConversationId || !enabled) {
             throw new Error("No conversation selected");
@@ -316,6 +405,7 @@ export const useConversationMessages = ({
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        retryMessage,
         editMessage,
         deleteMessage,
     };

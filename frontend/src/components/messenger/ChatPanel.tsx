@@ -23,15 +23,16 @@ import {
     AlertDialogTitle,
 } from "../ui/alert-dialog";
 import type { Conversation } from "../../features/conversations/conversations.api";
-import type { Message } from "../../features/messages/messages.api";
+import type { Message, ClientMessage } from "../../features/messages/messages.api";
 
 type ChatPanelProps = {
     conversation: Conversation | null;
-    messages: Message[];
+    messages: ClientMessage[];
     messagesLoading: boolean;
     messagesError: string | null;
     currentUserId: string | null;
-    onSendMessage: (content: string, replyToId?: string) => Promise<void>;
+    onSendMessage: (content: string, replyTo?: Message) => void;
+    onRetryMessage: (messageId: string) => void;
     onEditMessage: (messageId: string, content: string) => Promise<void>;
     onDeleteMessage: (messageId: string) => Promise<void>;
     messagesContainerRef: RefObject<HTMLDivElement | null>;
@@ -57,6 +58,7 @@ export const ChatPanel = ({
     messagesError,
     currentUserId,
     onSendMessage,
+    onRetryMessage,
     onEditMessage,
     onDeleteMessage,
     messagesContainerRef,
@@ -157,7 +159,7 @@ export const ChatPanel = ({
 
         const trimmedContent = content.trim();
 
-        if (!trimmedContent || submittingRef.current) {
+        if (!trimmedContent || submittingRef.current || messagesLoading || messagesError) {
             return;
         }
 
@@ -177,9 +179,9 @@ export const ChatPanel = ({
                 setEditingMessage(null);
                 setContent(draftRef.current);
             } else {
-                await onSendMessage(trimmedContent, replyingMessage?.id);
+                onSendMessage(trimmedContent, replyingMessage ?? undefined);
                 setContent("");
-                // Сбрасываем reply только после успеха; при ошибке сохраняем текст и цитату.
+                // Текст и reply уже сохранены в optimistic bubble, включая случай ошибки POST.
                 setReplyingMessage(null);
             }
         } catch (requestError) {
@@ -281,6 +283,7 @@ export const ChatPanel = ({
                                 onEdit={startEditing}
                                 onDelete={confirmDelete}
                                 onReply={startReply}
+                                onRetry={onRetryMessage}
                             />
                         ))}
                     </div>
@@ -343,7 +346,7 @@ export const ChatPanel = ({
                         type="submit"
                         className="flux-composer-send cursor-pointer"
                         aria-label={editingMessage ? "Save message" : "Send message"}
-                        disabled={isSubmitting || !content.trim()}
+                        disabled={isSubmitting || messagesLoading || Boolean(messagesError) || !content.trim()}
                     >
                         {editingMessage ? (
                             <Check size={18} strokeWidth={2} aria-hidden="true" />
