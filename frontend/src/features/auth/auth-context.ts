@@ -9,6 +9,8 @@ export type AuthContextValue = {
     loading: boolean;
     login: (identifier: string, password: string) => Promise<void>;
     authenticatedRequest: AuthenticatedRequest;
+    getAccessToken: () => string | null;
+    resolveAccessTokenAfter401: (rejectedToken: string) => Promise<string | null>;
 };
 
 // Сам Context выносим отдельно, чтобы AuthProvider.tsx

@@ -6,12 +6,15 @@ import { NavRail } from "../components/messenger/NavRail";
 import { useAuth } from "../features/auth/useAuth";
 import { useConversations } from "../features/conversations/useConversations";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
+import { useRealtimeConnection } from "../features/realtime/useRealtimeConnection";
 
 export const MessengerPage = () => {
-    const { user, accessToken, authenticatedRequest } = useAuth();
+    const { user, accessToken, authenticatedRequest, getAccessToken, resolveAccessTokenAfter401 } = useAuth();
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
     const shellRef = useRef<HTMLElement | null>(null); // ссылка на элемент main
     const isAuthenticated = Boolean(accessToken);
+
+    useRealtimeConnection({ enabled: isAuthenticated, getAccessToken, resolveAccessTokenAfter401 });
 
     // Берём данные о диалогах из нашего хука
     const { conversations, loading, error } = useConversations({
