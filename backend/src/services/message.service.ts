@@ -1,5 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
+import { Prisma } from "../generated/prisma/client.js";
+import { publishMessageCreated } from "../lib/socket.js";
 
 // Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
 const messageInclude = {
@@ -20,11 +22,13 @@ const messageInclude = {
     },
 } as const;
 
+// После сохр. в БД  публикует в сокетах message:created
 export const sendMessage = async (
     conversationId: string,
     senderId: string,
     content: string,
     replyToId?: string,
+    clientMessageId?: string,
 ) => {
     // Проверяем, что пользователь вообще состоит в этом чате
     const member = await prisma.conversationMember.findUnique({
@@ -40,6 +44,22 @@ export const sendMessage = async (
         throw new AppError(403, "You are not a member of this conversation");
     }
 
+    const findExisting = async () => {
+        if (!clientMessageId) return null;
+        const existing = await prisma.message.findUnique({
+            where: { senderId_clientMessageId: { senderId, clientMessageId } },
+            include: messageInclude,
+        });
+        // Один client id не используем для разных чатов, даже если автор состоит в обоих.
+        if (existing && existing.conversationId !== conversationId) {
+            throw new AppError(409, "Client message id already used in another conversation");
+        }
+        return existing;
+    };
+
+    const existing = await findExisting();
+    if (existing) return existing; // POST уже сохранился, а ответ потерялся — Retry возвращает ту же запись
+
     if (replyToId) {
         // Не позволяем цитировать сообщения из другого чата, даже зная их id.
         const replyTo = await prisma.message.findFirst({
@@ -52,17 +72,37 @@ export const sendMessage = async (
     }
 
     // Создаём само сообщение
-    return prisma.message.create({
-        data: {
-            content,
-            senderId,
-            conversationId,
-            replyToId: replyToId ?? null,
-        },
+    try {
+        // Сначала сохраняем в БД
+        const message = await prisma.message.create({
+            data: {
+                content,
+                senderId,
+                conversationId,
+                replyToId: replyToId ?? null,
+                clientMessageId: clientMessageId ?? null, // сохраняем связь с temp-сообщением
+            },
 
-        // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
-        include: messageInclude,
-    });
+            // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
+            include: messageInclude,
+        });
+        // После сохр. в БД публикуем в сокетах
+        await publishMessageCreated(message).catch(() => {
+            console.error("[socket] Failed to publish message:created");
+        });
+        return message;
+    } catch (error) {
+        // Два одновременных POST могли оба не найти запись; unique разрешит создать только одну.
+        if (
+            clientMessageId &&
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === "P2002"
+        ) {
+            const existing = await findExisting();
+            if (existing) return existing;
+        }
+        throw error;
+    }
 };
 
 export const getMessages = async (conversationId: string, userId: string, cursor?: string, limit = 30) => {

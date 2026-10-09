@@ -11,6 +11,7 @@ export type MessageSender = {
 export type Message = {
     id: string;
     content: string;
+    clientMessageId: string | null; // у старых сообщений null; новые связаны с frontend по этому UUID
     createdAt: string;
     updatedAt: string;
     senderId: string;
@@ -108,13 +109,14 @@ export const sendMessage = async (
     content: string,
     authenticatedRequest: AuthenticatedRequest,
     replyToId?: string,
+    clientMessageId?: string,
 ) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content, replyToId }),
+        body: JSON.stringify({ content, replyToId, clientMessageId }),
     });
 
     if (!response.ok) {

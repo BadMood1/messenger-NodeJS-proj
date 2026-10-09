@@ -3,6 +3,7 @@ import { z } from "zod";
 export const sendMessageSchema = z.object({
     content: z.string().trim().min(1, "Message cannot be empty").max(4000, "Message is too long"),
     replyToId: z.string().uuid().optional(),
+    clientMessageId: z.string().uuid().optional(), // UUID с frontend; без него старые запросы тоже работают
 });
 
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;

@@ -14,8 +14,6 @@ export const MessengerPage = () => {
     const shellRef = useRef<HTMLElement | null>(null); // ссылка на элемент main
     const isAuthenticated = Boolean(accessToken);
 
-    useRealtimeConnection({ enabled: isAuthenticated, getAccessToken, resolveAccessTokenAfter401 });
-
     // Берём данные о диалогах из нашего хука
     const { conversations, loading, error } = useConversations({
         enabled: isAuthenticated,
@@ -36,6 +34,7 @@ export const MessengerPage = () => {
         handleMessagesScroll,
         sendMessage,
         retryMessage,
+        handleMessageCreated, // соед. два хука (с realtime)
         editMessage,
         deleteMessage,
     } = useConversationMessages({
@@ -43,6 +42,13 @@ export const MessengerPage = () => {
         enabled: isAuthenticated,
         authenticatedRequest,
         currentUser: user,
+    });
+
+    useRealtimeConnection({
+        enabled: isAuthenticated,
+        getAccessToken,
+        resolveAccessTokenAfter401,
+        onMessageCreated: handleMessageCreated, // socket получает событие, message hook обновляет messages
     });
 
     const handleSelectConversation = (conversationId: string) => {

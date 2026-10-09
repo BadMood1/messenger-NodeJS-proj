@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import {
@@ -18,6 +18,28 @@ type UseConversationMessagesOptions = {
     currentUser: MessageSender | null;
 };
 
+// REST-ответ и socket-событие проходят одинаковую замену, независимо от того, что пришло первым.
+const mergeMessage = (current: ClientMessage[], message: Message): ClientMessage[] => {
+    // вдруг socket добавил, а затем пришёл ответ с POST
+    const existing = current.find((item) => item.id === message.id && !item.localStatus);
+    // Если обновили сообщение, оставляем его, иначе юзаем пришедшее новое message (вдруг отредачили)
+    const latest =
+        existing && Date.parse(existing.updatedAt) > Date.parse(message.updatedAt) ? existing : message;
+    // Убираем элементы, которые заменяем
+    return current
+        .filter(
+            (item) =>
+                item.id !== message.id && // серверный дубль
+                !(
+                    message.clientMessageId && // соответствующее локальное сообщение
+                    item.clientMessageId === message.clientMessageId &&
+                    item.senderId === message.senderId
+                ),
+        )
+        .concat(latest) // убрали дубль и соответствующий temp, добавили одно серверное сообщение
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)); // ставим на место по времени отправки
+};
+
 export const useConversationMessages = ({
     conversationId,
     enabled,
@@ -31,6 +53,8 @@ export const useConversationMessages = ({
     // Id сообщ., которые прямо сейчас отправляются
     const sendingIdsRef = useRef(new Set<string>());
     const historyVersionRef = useRef(0);
+    const initialLoadingRef = useRef(true);
+    const receivedDuringLoadRef = useRef<Message[]>([]); // события, пришедшие пока initial GET ещё ждёт ответа
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [messagesError, setMessagesError] = useState<string | null>(null);
 
@@ -58,7 +82,31 @@ export const useConversationMessages = ({
     useLayoutEffect(() => {
         conversationIdRef.current = conversationId;
         historyVersionRef.current += 1;
+        initialLoadingRef.current = true;
+        receivedDuringLoadRef.current = []; // события предыдущего чата больше не нужны
     }, [conversationId]);
+
+    // обрабатывает событие socket
+    // получает message который мы возвращаем в publishMessageCreated() (через emit)
+    const handleMessageCreated = useCallback(
+        (message: Message) => {
+            // Если авторизации нет(работа с сообщ. отключена) или событие пришло в другой чат — игнорируем.
+            if (!enabled || message.conversationId !== conversationIdRef.current) return;
+            // если история еще загружается - временно сохраняем событие
+            if (initialLoadingRef.current) {
+                receivedDuringLoadRef.current.push(message);
+                return;
+            }
+            const container = messagesContainerRef.current;
+            // Внизу показываем новое сообщение; при чтении старых не уводим пользователя со своего места.
+            if (container && container.scrollHeight - container.scrollTop - container.clientHeight < 80) {
+                shouldScrollToBottomRef.current = true;
+            }
+
+            setMessages((current) => mergeMessage(current, message));
+        },
+        [enabled],
+    );
 
     // Первая страница сообщений
     useEffect(() => {
@@ -95,7 +143,12 @@ export const useConversationMessages = ({
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
                     // Первую страницу показываем с самых новых сообщений внизу.
                     shouldScrollToBottomRef.current = true;
-                    setMessages(result.messages);
+                    // GET мог не увидеть новые события: добавляем их к истории, а не теряем при замене state.
+                    const merged = receivedDuringLoadRef.current.reduce<ClientMessage[]>(
+                        (current, message) => mergeMessage(current, message),
+                        result.messages,
+                    );
+                    setMessages(merged);
                     setNextCursor(result.nextCursor);
                     setHasMore(result.hasMore);
                 }
@@ -107,6 +160,8 @@ export const useConversationMessages = ({
                 }
             } finally {
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
+                    initialLoadingRef.current = false;
+                    receivedDuringLoadRef.current = [];
                     setMessagesLoading(false);
                 }
             }
@@ -257,16 +312,15 @@ export const useConversationMessages = ({
                 pending.content,
                 authenticatedRequest,
                 pending.replyToId ?? undefined,
+                pending.clientMessageId ?? undefined, // тот же UUID при первой отправке и при Retry
             );
             // Проверяем можно ли обновл. текущий чат
             if (isCurrent()) {
                 // меняем state
-                setMessages(
-                    (current) =>
-                        current
-                            .filter((item) => item.id !== message.id || item.id === pending.id) // если вдруг message уже есть в списке, то не пропускаем дальше
-                            .map((item) => (item.id === pending.id ? message : item)), // заменяем temp на серверный id
-                );
+                // По id убираем серверный дубль, по clientMessageId заменяем свой temp.
+                setMessages((current) =>
+                    current.some((item) => item.id === pending.id) ? mergeMessage(current, message) : current,
+                ); // socket уже заменил temp; поздний POST не вернёт сообщение после локального Delete
             }
         } catch (error) {
             if (isCurrent()) {
@@ -297,9 +351,11 @@ export const useConversationMessages = ({
         }
 
         const now = new Date().toISOString();
+        const clientMessageId = crypto.randomUUID(); // создаём один раз; Retry копирует его вместе с pending
         // Создали объект сообщения с временным id, чтобы сразу показать его в списке.
         const pending: ClientMessage = {
-            id: `temp:${crypto.randomUUID()}`,
+            id: `temp:${clientMessageId}`, // локальный id для UI, не серверный Message.id
+            clientMessageId,
             content,
             createdAt: now,
             updatedAt: now,
@@ -329,9 +385,7 @@ export const useConversationMessages = ({
         };
         // Retry — новая попытка сейчас: переносим тот же temp вниз и сразу обновляем время.
         shouldScrollToBottomRef.current = true;
-        setMessages((current) =>
-            [...current.filter((message) => message.id !== messageId), retried],
-        );
+        setMessages((current) => [...current.filter((message) => message.id !== messageId), retried]);
         void deliverMessage(retried);
     };
 
@@ -405,6 +459,7 @@ export const useConversationMessages = ({
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
+        handleMessageCreated,
         retryMessage,
         editMessage,
         deleteMessage,
