@@ -25,6 +25,8 @@ export type Message = {
     } | null;
 };
 
+export type MessageDeletedEvent = Pick<Message, "id" | "conversationId">;
+
 type MessagesResponse = {
     messages: Message[];
     nextCursor: string | null;
@@ -168,10 +170,7 @@ export const editMessage = async (
     return data.message;
 };
 
-export const deleteMessage = async (
-    messageId: string,
-    authenticatedRequest: AuthenticatedRequest,
-) => {
+export const deleteMessage = async (messageId: string, authenticatedRequest: AuthenticatedRequest) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/messages/${messageId}`, {
         method: "DELETE",
     });

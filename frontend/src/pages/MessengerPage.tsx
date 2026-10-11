@@ -35,6 +35,7 @@ export const MessengerPage = () => {
         sendMessage,
         retryMessage,
         handleMessageCreated, // соед. два хука (с realtime)
+        handleMessageDeleted,
         editMessage,
         deleteMessage,
     } = useConversationMessages({
@@ -49,6 +50,7 @@ export const MessengerPage = () => {
         getAccessToken,
         resolveAccessTokenAfter401,
         onMessageCreated: handleMessageCreated, // socket получает событие, message hook обновляет messages
+        onMessageDeleted: handleMessageDeleted,
     });
 
     const handleSelectConversation = (conversationId: string) => {

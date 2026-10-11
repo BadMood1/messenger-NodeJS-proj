@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
 import { Prisma } from "../generated/prisma/client.js";
-import { publishMessageCreated } from "../lib/socket.js";
+import { publishMessageCreated, publishMessageDeleted } from "../lib/socket.js";
 
 // Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
 const messageInclude = {
@@ -220,5 +220,9 @@ export const deleteMessage = async (messageId: string, userId: string) => {
         where: {
             id: messageId,
         },
+    });
+    // Сначала удаляем в БД, потом уведомляем. Ошибка публикации не отменяет успешный DELETE.
+    await publishMessageDeleted(message).catch(() => {
+        console.error("[socket] Failed to publish message:deleted");
     });
 };

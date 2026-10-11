@@ -57,19 +57,34 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
     return io;
 };
 
-// Находит участников чата и отправляет им готовое сообщение с данными автора и reply preview
-export const publishMessageCreated = async (message: Message) => {
-    if (!socketServer) return;
+// Ф-ция находит участников чата и возвращает сформированные rooms
+const getConversationRooms = async (conversationId: string) => {
     // Берём пользователей конкретного чата, включая отправителя. Это userId, а не вкладки/socket'ы.
     const members = await prisma.conversationMember.findMany({
-        where: { conversationId: message.conversationId },
+        where: { conversationId },
         select: { userId: true },
     });
     // Для каждого участника выбираем его room user:<userId>.
     // При подключении socket.join(...) добавляет туда каждый socket этого пользователя:
     // например, две вкладки отправителя = два socket в одной его room.
     // user:<userId> — все подключения одного пользователя;
-    const rooms = members.map((member) => `user:${member.userId}`);
+    return members.map((member) => `user:${member.userId}`);
+};
+
+// Находит участников чата и отправляет им готовое сообщение с данными автора и reply preview
+export const publishMessageCreated = async (message: Message) => {
+    if (!socketServer) return;
+    const rooms = await getConversationRooms(message.conversationId);
     // emit получат все socket'ы внутри выбранных rooms — то есть все подключённые вкладки участников.
     if (rooms.length) socketServer.to(rooms).emit("message:created", message);
+};
+
+export const publishMessageDeleted = async ({
+    id,
+    conversationId,
+}: Pick<Message, "id" | "conversationId">) => {
+    if (!socketServer) return;
+    const rooms = await getConversationRooms(conversationId);
+    // Текст уже удалён; вкладкам участников достаточно знать id сообщения и его чата.
+    if (rooms.length) socketServer.to(rooms).emit("message:deleted", { id, conversationId });
 };

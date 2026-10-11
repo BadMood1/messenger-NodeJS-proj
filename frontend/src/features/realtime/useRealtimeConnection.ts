@@ -4,12 +4,13 @@ import { io } from "socket.io-client";
 
 import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
-import type { Message } from "../messages/messages.api";
+import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 
 // Pick берёт типы двух функций из auth context; & добавляет настройки realtime-хука.
 type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessTokenAfter401"> & {
     enabled: boolean;
     onMessageCreated: (message: Message) => void;
+    onMessageDeleted: (message: MessageDeletedEvent) => void;
 };
 
 export const useRealtimeConnection = ({
@@ -17,6 +18,7 @@ export const useRealtimeConnection = ({
     getAccessToken,
     resolveAccessTokenAfter401,
     onMessageCreated,
+    onMessageDeleted,
 }: RealtimeOptions) => {
     useEffect(() => {
         if (!enabled) return;
@@ -74,6 +76,7 @@ export const useRealtimeConnection = ({
         socket.on("disconnect", onDisconnect); // потеряно или закрыто
         socket.on("connect_error", onConnectError); // попытка подключения не удалась
         socket.on("message:created", onMessageCreated); // передаём сообщение в message hook, state остаётся там
+        socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
 
         socket.connect();
 
@@ -84,7 +87,8 @@ export const useRealtimeConnection = ({
             socket.off("disconnect", onDisconnect);
             socket.off("connect_error", onConnectError);
             socket.off("message:created", onMessageCreated);
+            socket.off("message:deleted", onMessageDeleted);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
         };
-    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated]); // выбранный conversation не влияет на соединение
+    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageDeleted]); // выбранный conversation не влияет на соединение
 };

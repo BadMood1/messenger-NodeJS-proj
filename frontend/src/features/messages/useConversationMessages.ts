@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
+import { mergeMessage, removeDeletedMessages, updateEditedMessage } from "./message-state-updates";
+import { useMessageScrollPosition } from "./useMessageScrollPosition";
 import {
     deleteMessage as deleteMessageRequest,
     editMessage as editMessageRequest,
@@ -9,6 +11,7 @@ import {
     type Message,
     type ClientMessage,
     type MessageSender,
+    type MessageDeletedEvent,
 } from "./messages.api";
 
 type UseConversationMessagesOptions = {
@@ -16,28 +19,6 @@ type UseConversationMessagesOptions = {
     enabled: boolean;
     authenticatedRequest: AuthenticatedRequest;
     currentUser: MessageSender | null;
-};
-
-// REST-ответ и socket-событие проходят одинаковую замену, независимо от того, что пришло первым.
-const mergeMessage = (current: ClientMessage[], message: Message): ClientMessage[] => {
-    // вдруг socket добавил, а затем пришёл ответ с POST
-    const existing = current.find((item) => item.id === message.id && !item.localStatus);
-    // Если обновили сообщение, оставляем его, иначе юзаем пришедшее новое message (вдруг отредачили)
-    const latest =
-        existing && Date.parse(existing.updatedAt) > Date.parse(message.updatedAt) ? existing : message;
-    // Убираем элементы, которые заменяем
-    return current
-        .filter(
-            (item) =>
-                item.id !== message.id && // серверный дубль
-                !(
-                    message.clientMessageId && // соответствующее локальное сообщение
-                    item.clientMessageId === message.clientMessageId &&
-                    item.senderId === message.senderId
-                ),
-        )
-        .concat(latest) // убрали дубль и соответствующий temp, добавили одно серверное сообщение
-        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)); // ставим на место по времени отправки
 };
 
 export const useConversationMessages = ({
@@ -55,6 +36,8 @@ export const useConversationMessages = ({
     const historyVersionRef = useRef(0);
     const initialLoadingRef = useRef(true);
     const receivedDuringLoadRef = useRef<Message[]>([]); // события, пришедшие пока initial GET ещё ждёт ответа
+    // Помним удаления в текущем чате, чтобы запоздавший GET/socket не вернул сообщение или его цитату.
+    const deletedMessageIdsRef = useRef(new Set<string>());
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [messagesError, setMessagesError] = useState<string | null>(null);
 
@@ -64,27 +47,29 @@ export const useConversationMessages = ({
     const [olderMessagesError, setOlderMessagesError] = useState<string | null>(null);
 
     const conversationIdRef = useRef(conversationId); // актуальный ID
-    const messagesContainerRef = useRef<HTMLDivElement | null>(null); // DOM-эл списка сообщений
     const loadOlderControllerRef = useRef<AbortController | null>(null); // хранит контроллер для отмены запроса
     const isLoadingOlderRef = useRef(false); // хранит состояние загрузки старых сообщений, чтобы не гонять несколько запросов одновременно
-    // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
-    const shouldScrollToBottomRef = useRef(false);
-    // Снимок прямо перед prepend: сохраняем видимое сообщение и его положение на экране.
-    const prependScrollRef = useRef<{
-        anchor: HTMLElement | null;
-        offset: number;
-        scrollHeight: number;
-        scrollTop: number;
-    } | null>(null);
 
     // useLayoutEffect выполняется раньше обычного useEffect — сразу после того, как
     // React применил изменения в DOM, но до того, как браузер покажет кадр.
+
     useLayoutEffect(() => {
         conversationIdRef.current = conversationId;
-        historyVersionRef.current += 1;
+        historyVersionRef.current += 1; // отличать старые запросы от актуальных
         initialLoadingRef.current = true;
         receivedDuringLoadRef.current = []; // события предыдущего чата больше не нужны
+        deletedMessageIdsRef.current.clear();
     }, [conversationId]);
+
+    const {
+        messagesContainerRef,
+        scrollToBottomAfterUpdate,
+        isNearBottom,
+        isNearTop,
+        resetScrollPosition,
+        saveScrollBeforePrepend,
+        clearPrependScrollSnapshot,
+    } = useMessageScrollPosition(messages);
 
     // обрабатывает событие socket
     // получает message который мы возвращаем в publishMessageCreated() (через emit)
@@ -92,18 +77,32 @@ export const useConversationMessages = ({
         (message: Message) => {
             // Если авторизации нет(работа с сообщ. отключена) или событие пришло в другой чат — игнорируем.
             if (!enabled || message.conversationId !== conversationIdRef.current) return;
+            if (deletedMessageIdsRef.current.has(message.id)) return; // чтобы запоздавший socket не вернул удалённое сообщение
             // если история еще загружается - временно сохраняем событие
             if (initialLoadingRef.current) {
                 receivedDuringLoadRef.current.push(message);
                 return;
             }
-            const container = messagesContainerRef.current;
             // Внизу показываем новое сообщение; при чтении старых не уводим пользователя со своего места.
-            if (container && container.scrollHeight - container.scrollTop - container.clientHeight < 80) {
-                shouldScrollToBottomRef.current = true;
+            if (isNearBottom()) {
+                scrollToBottomAfterUpdate();
             }
 
-            setMessages((current) => mergeMessage(current, message));
+            // добавл. серверное сообщение без дублей, убираем известные удаления и очищает цитаты
+            setMessages((current) =>
+                removeDeletedMessages(mergeMessage(current, message), deletedMessageIdsRef.current),
+            );
+        },
+        [enabled, isNearBottom, scrollToBottomAfterUpdate],
+    );
+
+    // добавл. id в REF, убираем удалённые сообщения и очищает цитаты на них
+    const handleMessageDeleted = useCallback(
+        ({ id, conversationId }: MessageDeletedEvent) => {
+            if (!enabled || conversationId !== conversationIdRef.current) return;
+            deletedMessageIdsRef.current.add(id);
+            // Событие и ответ своего DELETE используют один путь; повторное удаление безопасно.
+            setMessages((current) => removeDeletedMessages(current, deletedMessageIdsRef.current));
         },
         [enabled],
     );
@@ -113,10 +112,7 @@ export const useConversationMessages = ({
         loadOlderControllerRef.current?.abort();
         loadOlderControllerRef.current = null;
         isLoadingOlderRef.current = false;
-        // Новый чат должен дождаться собственной первой страницы перед прокруткой вниз.
-        shouldScrollToBottomRef.current = false;
-        // Снимок старого чата больше не нужен.
-        prependScrollRef.current = null;
+        resetScrollPosition();
 
         if (!conversationId || !enabled) {
             return;
@@ -142,13 +138,14 @@ export const useConversationMessages = ({
 
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
                     // Первую страницу показываем с самых новых сообщений внизу.
-                    shouldScrollToBottomRef.current = true;
+                    scrollToBottomAfterUpdate();
                     // GET мог не увидеть новые события: добавляем их к истории, а не теряем при замене state.
                     const merged = receivedDuringLoadRef.current.reduce<ClientMessage[]>(
                         (current, message) => mergeMessage(current, message),
                         result.messages,
                     );
-                    setMessages(merged);
+                    // учитываем удаления и записываем результат
+                    setMessages(removeDeletedMessages(merged, deletedMessageIdsRef.current));
                     setNextCursor(result.nextCursor);
                     setHasMore(result.hasMore);
                 }
@@ -173,57 +170,20 @@ export const useConversationMessages = ({
             controller.abort();
             loadOlderControllerRef.current?.abort();
         };
-    }, [authenticatedRequest, conversationId, enabled]);
-
-    // Выставляем нужную позицию до отрисовки кадра, чтобы скролл не прыгал.
-    useLayoutEffect(() => {
-        const container = messagesContainerRef.current;
-
-        if (!container) {
-            return;
-        }
-
-        // После initial load DOM уже знает полную высоту первой страницы.
-        if (shouldScrollToBottomRef.current) {
-            container.scrollTop = container.scrollHeight;
-            // Следующие изменения messages не должны снова переносить пользователя вниз.
-            shouldScrollToBottomRef.current = false;
-            return;
-        }
-
-        const previousScroll = prependScrollRef.current;
-
-        if (!previousScroll) {
-            return;
-        }
-
-        if (previousScroll.anchor && container.contains(previousScroll.anchor)) {
-            // Возвращаем то же сообщение на ту же высоту, даже если у bubbles разные размеры.
-            const currentOffset =
-                previousScroll.anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
-            container.scrollTop += currentOffset - previousScroll.offset;
-        } else {
-            // Запасной вариант, если сообщение-якорь удалили вместе с другим обновлением.
-            container.scrollTop =
-                previousScroll.scrollTop + (container.scrollHeight - previousScroll.scrollHeight);
-        }
-        prependScrollRef.current = null;
-    }, [messages]);
+    }, [authenticatedRequest, conversationId, enabled, resetScrollPosition, scrollToBottomAfterUpdate]);
 
     // Вызываем из ChatPanel при скролле
     const handleMessagesScroll = () => {
-        const container = messagesContainerRef.current;
         const currentConversationId = conversationIdRef.current;
 
         if (
-            !container ||
+            !isNearTop() ||
             !currentConversationId ||
             historyConversationId !== currentConversationId ||
             !hasMore ||
             !nextCursor ||
             isLoadingOlderRef.current ||
-            !enabled ||
-            container.scrollTop > 80
+            !enabled
         ) {
             return;
         }
@@ -237,10 +197,32 @@ export const useConversationMessages = ({
 
         const loadOlderMessages = async () => {
             try {
-                const result = await getMessages(currentConversationId, authenticatedRequest, {
-                    cursor: nextCursor,
+                // Если cursor удалили, продолжаем от самого старого живого серверного сообщения.
+                const getCursor = () =>
+                    deletedMessageIdsRef.current.has(nextCursor)
+                        ? messages.find(
+                              (message) =>
+                                  !message.localStatus && !deletedMessageIdsRef.current.has(message.id),
+                          )?.id
+                        : nextCursor;
+                const cursor = getCursor();
+                let result = await getMessages(currentConversationId, authenticatedRequest, {
+                    cursor,
                     signal: controller.signal,
                 });
+
+                // Cursor мог исчезнуть и во время запроса; один раз повторяем с актуальной границей.
+                if (
+                    cursor &&
+                    deletedMessageIdsRef.current.has(cursor) &&
+                    !controller.signal.aborted &&
+                    conversationIdRef.current === currentConversationId
+                ) {
+                    result = await getMessages(currentConversationId, authenticatedRequest, {
+                        cursor: getCursor(),
+                        signal: controller.signal,
+                    });
+                }
 
                 if (controller.signal.aborted || conversationIdRef.current !== currentConversationId) {
                     return;
@@ -248,29 +230,16 @@ export const useConversationMessages = ({
 
                 // За время запроса пользователь мог прокрутить дальше или отправить сообщение.
                 // Поэтому снимаем текущую геометрию только сейчас, перед изменением messages.
-                const container = messagesContainerRef.current;
-                if (container) {
-                    const { top, bottom } = container.getBoundingClientRect();
-                    const anchor =
-                        Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]")).find(
-                            (element) => {
-                                const rect = element.getBoundingClientRect();
-                                return rect.bottom > top && rect.top < bottom;
-                            },
-                        ) ?? null;
-                    prependScrollRef.current = {
-                        anchor,
-                        offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
-                        scrollHeight: container.scrollHeight,
-                        scrollTop: container.scrollTop,
-                    };
-                }
+                saveScrollBeforePrepend();
 
                 setMessages((currentMessages) => {
                     const currentIds = new Set(currentMessages.map((message) => message.id));
                     const olderMessages = result.messages.filter((message) => !currentIds.has(message.id));
 
-                    return [...olderMessages, ...currentMessages];
+                    return removeDeletedMessages(
+                        [...olderMessages, ...currentMessages],
+                        deletedMessageIdsRef.current,
+                    );
                 });
                 setNextCursor(result.nextCursor);
                 setHasMore(result.hasMore);
@@ -281,7 +250,7 @@ export const useConversationMessages = ({
                             ? requestError.message
                             : "Failed to load older messages",
                     );
-                    prependScrollRef.current = null;
+                    clearPrependScrollSnapshot();
                 }
             } finally {
                 // Старый запрос не должен сбрасывать loading нового запроса.
@@ -319,7 +288,9 @@ export const useConversationMessages = ({
                 // меняем state
                 // По id убираем серверный дубль, по clientMessageId заменяем свой temp.
                 setMessages((current) =>
-                    current.some((item) => item.id === pending.id) ? mergeMessage(current, message) : current,
+                    current.some((item) => item.id === pending.id)
+                        ? removeDeletedMessages(mergeMessage(current, message), deletedMessageIdsRef.current)
+                        : current,
                 ); // socket уже заменил temp; поздний POST не вернёт сообщение после локального Delete
             }
         } catch (error) {
@@ -366,7 +337,7 @@ export const useConversationMessages = ({
             replyTo: replyTo ? { id: replyTo.id, content: replyTo.content, sender: replyTo.sender } : null,
             localStatus: "sending",
         };
-        shouldScrollToBottomRef.current = true; // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
+        scrollToBottomAfterUpdate(); // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
         setMessages((current) => [...current, pending]); // добавляем сообщ. в конец списка, чтобы сразу показать его в UI.
         // Ошибки POST остаются в bubble, а composer можно сразу использовать снова.
         void deliverMessage(pending); // асинхронно отправляем на сервер, не дожидаясь ответа.
@@ -384,7 +355,7 @@ export const useConversationMessages = ({
             sendError: undefined,
         };
         // Retry — новая попытка сейчас: переносим тот же temp вниз и сразу обновляем время.
-        shouldScrollToBottomRef.current = true;
+        scrollToBottomAfterUpdate();
         setMessages((current) => [...current.filter((message) => message.id !== messageId), retried]);
         void deliverMessage(retried);
     };
@@ -400,19 +371,7 @@ export const useConversationMessages = ({
 
         // PATCH старого чата не должен менять сообщения в уже открытом новом чате.
         if (conversationIdRef.current === currentConversationId) {
-            // Обновляем также цитаты этого сообщения, чтобы они совпадали с будущим GET.
-            setMessages((currentMessages) =>
-                currentMessages.map((currentMessage) => {
-                    if (currentMessage.id === message.id) return message;
-                    if (currentMessage.replyTo?.id === message.id) {
-                        return {
-                            ...currentMessage,
-                            replyTo: { ...currentMessage.replyTo, content: message.content },
-                        };
-                    }
-                    return currentMessage;
-                }),
-            );
+            setMessages((currentMessages) => updateEditedMessage(currentMessages, message));
         }
     };
 
@@ -434,16 +393,7 @@ export const useConversationMessages = ({
 
         // DELETE старого чата не должен менять сообщения в уже открытом новом чате.
         if (conversationIdRef.current === currentConversationId) {
-            setMessages((currentMessages) =>
-                // Повторяем ON DELETE SET NULL в уже загруженных reply previews.
-                currentMessages
-                    .filter((currentMessage) => currentMessage.id !== messageId)
-                    .map((message) =>
-                        message.replyToId === messageId
-                            ? { ...message, replyToId: null, replyTo: null }
-                            : message,
-                    ),
-            );
+            handleMessageDeleted({ id: messageId, conversationId: currentConversationId });
         }
     };
 
@@ -460,6 +410,7 @@ export const useConversationMessages = ({
         handleMessagesScroll,
         sendMessage,
         handleMessageCreated,
+        handleMessageDeleted,
         retryMessage,
         editMessage,
         deleteMessage,
