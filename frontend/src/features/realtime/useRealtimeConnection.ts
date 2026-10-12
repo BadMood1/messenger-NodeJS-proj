@@ -10,6 +10,7 @@ import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessTokenAfter401"> & {
     enabled: boolean;
     onMessageCreated: (message: Message) => void;
+    onMessageUpdated: (message: Message) => void;
     onMessageDeleted: (message: MessageDeletedEvent) => void;
 };
 
@@ -18,6 +19,7 @@ export const useRealtimeConnection = ({
     getAccessToken,
     resolveAccessTokenAfter401,
     onMessageCreated,
+    onMessageUpdated,
     onMessageDeleted,
 }: RealtimeOptions) => {
     useEffect(() => {
@@ -76,6 +78,7 @@ export const useRealtimeConnection = ({
         socket.on("disconnect", onDisconnect); // потеряно или закрыто
         socket.on("connect_error", onConnectError); // попытка подключения не удалась
         socket.on("message:created", onMessageCreated); // передаём сообщение в message hook, state остаётся там
+        socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
         socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
 
         socket.connect();
@@ -87,8 +90,9 @@ export const useRealtimeConnection = ({
             socket.off("disconnect", onDisconnect);
             socket.off("connect_error", onConnectError);
             socket.off("message:created", onMessageCreated);
+            socket.off("message:updated", onMessageUpdated);
             socket.off("message:deleted", onMessageDeleted);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
         };
-    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageDeleted]); // выбранный conversation не влияет на соединение
+    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageUpdated, onMessageDeleted]); // выбранный conversation не влияет на соединение
 };

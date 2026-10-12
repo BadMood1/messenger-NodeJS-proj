@@ -21,6 +21,7 @@ export type Message = {
     replyTo: {
         id: string;
         content: string;
+        updatedAt: string; // Дата правки цитируемого сообщения, не самого ответа.
         sender: Pick<MessageSender, "id" | "name" | "username">;
     } | null;
 };

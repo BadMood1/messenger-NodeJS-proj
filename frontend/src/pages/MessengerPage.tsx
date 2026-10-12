@@ -35,6 +35,7 @@ export const MessengerPage = () => {
         sendMessage,
         retryMessage,
         handleMessageCreated, // соед. два хука (с realtime)
+        handleMessageUpdated,
         handleMessageDeleted,
         editMessage,
         deleteMessage,
@@ -50,6 +51,7 @@ export const MessengerPage = () => {
         getAccessToken,
         resolveAccessTokenAfter401,
         onMessageCreated: handleMessageCreated, // socket получает событие, message hook обновляет messages
+        onMessageUpdated: handleMessageUpdated,
         onMessageDeleted: handleMessageDeleted,
     });
 

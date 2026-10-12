@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { mergeMessage, removeDeletedMessages, updateEditedMessage } from "./message-state-updates";
+import { applyKnownMessageChanges, mergeMessage } from "./message-state-updates";
 import { useMessageScrollPosition } from "./useMessageScrollPosition";
 import {
     deleteMessage as deleteMessageRequest,
@@ -38,6 +38,8 @@ export const useConversationMessages = ({
     const receivedDuringLoadRef = useRef<Message[]>([]); // события, пришедшие пока initial GET ещё ждёт ответа
     // Помним удаления в текущем чате, чтобы запоздавший GET/socket не вернул сообщение или его цитату.
     const deletedMessageIdsRef = useRef(new Set<string>());
+    // Хранит правки сообщений
+    const editedMessagesRef = useRef(new Map<string, Message>());
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [messagesError, setMessagesError] = useState<string | null>(null);
 
@@ -59,6 +61,7 @@ export const useConversationMessages = ({
         initialLoadingRef.current = true;
         receivedDuringLoadRef.current = []; // события предыдущего чата больше не нужны
         deletedMessageIdsRef.current.clear();
+        editedMessagesRef.current.clear();
     }, [conversationId]);
 
     const {
@@ -70,6 +73,13 @@ export const useConversationMessages = ({
         saveScrollBeforePrepend,
         clearPrependScrollSnapshot,
     } = useMessageScrollPosition(messages);
+
+    // Все ответы и события учитывают уже известные правки и удаления текущего чата.
+    const applyKnownChanges = useCallback(
+        (current: ClientMessage[]) =>
+            applyKnownMessageChanges(current, editedMessagesRef.current, deletedMessageIdsRef.current),
+        [],
+    );
 
     // обрабатывает событие socket
     // получает message который мы возвращаем в publishMessageCreated() (через emit)
@@ -89,11 +99,24 @@ export const useConversationMessages = ({
             }
 
             // добавл. серверное сообщение без дублей, убираем известные удаления и очищает цитаты
-            setMessages((current) =>
-                removeDeletedMessages(mergeMessage(current, message), deletedMessageIdsRef.current),
-            );
+            setMessages((current) => applyKnownChanges(mergeMessage(current, message)));
         },
-        [enabled, isNearBottom, scrollToBottomAfterUpdate],
+        [enabled, isNearBottom, scrollToBottomAfterUpdate, applyKnownChanges],
+    );
+
+    const handleMessageUpdated = useCallback(
+        (message: Message) => {
+            if (!enabled || message.conversationId !== conversationIdRef.current) return;
+            if (deletedMessageIdsRef.current.has(message.id)) return; // не удалено ли
+            //  Если уже редачили, то более свежая правка не должна быть перезаписана более старой (может задержаться запрос например)
+            const previous = editedMessagesRef.current.get(message.id);
+            if (previous && Date.parse(previous.updatedAt) > Date.parse(message.updatedAt)) return;
+
+            // Сохраняем правку и во время initial GET/pagination, чтобы их поздний ответ не затёр её.
+            editedMessagesRef.current.set(message.id, message);
+            setMessages((current) => applyKnownChanges(current)); // применяем правки и удаления к текущим сообщениям
+        },
+        [enabled, applyKnownChanges],
     );
 
     // добавл. id в REF, убираем удалённые сообщения и очищает цитаты на них
@@ -101,10 +124,11 @@ export const useConversationMessages = ({
         ({ id, conversationId }: MessageDeletedEvent) => {
             if (!enabled || conversationId !== conversationIdRef.current) return;
             deletedMessageIdsRef.current.add(id);
+            editedMessagesRef.current.delete(id);
             // Событие и ответ своего DELETE используют один путь; повторное удаление безопасно.
-            setMessages((current) => removeDeletedMessages(current, deletedMessageIdsRef.current));
+            setMessages((current) => applyKnownChanges(current));
         },
-        [enabled],
+        [enabled, applyKnownChanges],
     );
 
     // Первая страница сообщений
@@ -145,7 +169,7 @@ export const useConversationMessages = ({
                         result.messages,
                     );
                     // учитываем удаления и записываем результат
-                    setMessages(removeDeletedMessages(merged, deletedMessageIdsRef.current));
+                    setMessages(applyKnownChanges(merged));
                     setNextCursor(result.nextCursor);
                     setHasMore(result.hasMore);
                 }
@@ -170,7 +194,14 @@ export const useConversationMessages = ({
             controller.abort();
             loadOlderControllerRef.current?.abort();
         };
-    }, [authenticatedRequest, conversationId, enabled, resetScrollPosition, scrollToBottomAfterUpdate]);
+    }, [
+        authenticatedRequest,
+        conversationId,
+        enabled,
+        resetScrollPosition,
+        scrollToBottomAfterUpdate,
+        applyKnownChanges,
+    ]);
 
     // Вызываем из ChatPanel при скролле
     const handleMessagesScroll = () => {
@@ -236,10 +267,7 @@ export const useConversationMessages = ({
                     const currentIds = new Set(currentMessages.map((message) => message.id));
                     const olderMessages = result.messages.filter((message) => !currentIds.has(message.id));
 
-                    return removeDeletedMessages(
-                        [...olderMessages, ...currentMessages],
-                        deletedMessageIdsRef.current,
-                    );
+                    return applyKnownChanges([...olderMessages, ...currentMessages]);
                 });
                 setNextCursor(result.nextCursor);
                 setHasMore(result.hasMore);
@@ -289,7 +317,7 @@ export const useConversationMessages = ({
                 // По id убираем серверный дубль, по clientMessageId заменяем свой temp.
                 setMessages((current) =>
                     current.some((item) => item.id === pending.id)
-                        ? removeDeletedMessages(mergeMessage(current, message), deletedMessageIdsRef.current)
+                        ? applyKnownChanges(mergeMessage(current, message))
                         : current,
                 ); // socket уже заменил temp; поздний POST не вернёт сообщение после локального Delete
             }
@@ -334,7 +362,14 @@ export const useConversationMessages = ({
             sender: currentUser,
             conversationId: currentConversationId,
             replyToId: replyTo?.id ?? null,
-            replyTo: replyTo ? { id: replyTo.id, content: replyTo.content, sender: replyTo.sender } : null,
+            replyTo: replyTo
+                ? {
+                      id: replyTo.id,
+                      content: replyTo.content,
+                      updatedAt: replyTo.updatedAt,
+                      sender: replyTo.sender,
+                  }
+                : null,
             localStatus: "sending",
         };
         scrollToBottomAfterUpdate(); // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
@@ -362,6 +397,7 @@ export const useConversationMessages = ({
 
     const editMessage = async (messageId: string, content: string) => {
         const currentConversationId = conversationIdRef.current;
+        const historyVersion = historyVersionRef.current;
 
         if (!currentConversationId || !enabled) {
             throw new Error("No conversation selected");
@@ -370,8 +406,12 @@ export const useConversationMessages = ({
         const message = await editMessageRequest(messageId, content, authenticatedRequest);
 
         // PATCH старого чата не должен менять сообщения в уже открытом новом чате.
-        if (conversationIdRef.current === currentConversationId) {
-            setMessages((currentMessages) => updateEditedMessage(currentMessages, message));
+        if (
+            conversationIdRef.current === currentConversationId &&
+            historyVersionRef.current === historyVersion
+        ) {
+            // Ответ PATCH и socket-событие используют один обработчик, независимо от порядка доставки.
+            handleMessageUpdated(message);
         }
     };
 
@@ -410,6 +450,7 @@ export const useConversationMessages = ({
         handleMessagesScroll,
         sendMessage,
         handleMessageCreated,
+        handleMessageUpdated,
         handleMessageDeleted,
         retryMessage,
         editMessage,

@@ -79,6 +79,13 @@ export const publishMessageCreated = async (message: Message) => {
     if (rooms.length) socketServer.to(rooms).emit("message:created", message);
 };
 
+export const publishMessageUpdated = async (message: Message) => {
+    if (!socketServer) return;
+    const rooms = await getConversationRooms(message.conversationId);
+    // Отправляем уже сохранённую правку всем подключениям участников, включая автора.
+    if (rooms.length) socketServer.to(rooms).emit("message:updated", message);
+};
+
 export const publishMessageDeleted = async ({
     id,
     conversationId,

@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
 import { Prisma } from "../generated/prisma/client.js";
-import { publishMessageCreated, publishMessageDeleted } from "../lib/socket.js";
+import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../lib/socket.js";
 
 // Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
 const messageInclude = {
@@ -17,6 +17,7 @@ const messageInclude = {
         select: {
             id: true,
             content: true,
+            updatedAt: true, // Дата оригинала позволяет frontend сравнить свежесть цитаты без загрузки самого сообщения.
             sender: { select: { id: true, name: true, username: true } },
         },
     },
@@ -185,7 +186,7 @@ export const editMessage = async (messageId: string, userId: string, content: st
     }
 
     // возвр. обновлённый message и данные sender'а
-    return prisma.message.update({
+    const updatedMessage = await prisma.message.update({
         where: {
             id: messageId,
         },
@@ -196,6 +197,11 @@ export const editMessage = async (messageId: string, userId: string, content: st
 
         include: messageInclude,
     });
+    // PATCH остаётся успешным, даже если уведомление через socket не удалось отправить.
+    await publishMessageUpdated(updatedMessage).catch(() => {
+        console.error("[socket] Failed to publish message:updated");
+    });
+    return updatedMessage;
 };
 
 //
