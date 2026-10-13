@@ -1,7 +1,7 @@
 import type { ClientMessage, Message } from "./messages.api";
 
 // REST-ответ и socket-событие проходят одинаковую замену, независимо от того, что пришло первым.
-// добавл. серверное сообщение без дублей
+// добавл. серверное сообщение без дублей (в messagesBeforeMerge и возвр. дальше)
 export const mergeMessage = (
     messagesBeforeMerge: ClientMessage[],
     receivedMessage: Message,
@@ -31,6 +31,26 @@ export const mergeMessage = (
             (firstMessage, secondMessage) =>
                 Date.parse(firstMessage.createdAt) - Date.parse(secondMessage.createdAt),
         ); // ставим на место по времени отправки
+};
+
+// собирает новый список: заменяет старую серверную историю перечитанной, но сохраняет локальные отправки и сообщения, поступившие во время GET.
+export const reconcileMessageHistory = (
+    messagesNow: ClientMessage[],
+    reloadedMessages: Message[],
+    serverIdsBeforeReload: ReadonlySet<string>,
+): ClientMessage[] => {
+    // есть localStatus - локальное sending/failed или его id отсутств. в исходном наборе, значит сообщ. появилось во время сверки
+    const messagesToKeep = messagesNow.filter(
+        (message) => message.localStatus || !serverIdsBeforeReload.has(message.id),
+    );
+
+    let mergedMessages = messagesToKeep;
+    // добавляем reloaded сообщения к сохранённым, убираем дубли и сортируем по времени отправки
+    for (const reloadedMessage of reloadedMessages) {
+        mergedMessages = mergeMessage(mergedMessages, reloadedMessage); // по 1-му добавл. в mergedMessages
+    }
+
+    return mergedMessages;
 };
 
 // Получает текущий массив сообщений и набор удаленных id.Возвр. новые сообщения без удаленных и без цитат на удаленные

@@ -12,6 +12,7 @@ type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessT
     onMessageCreated: (message: Message) => void;
     onMessageUpdated: (message: Message) => void;
     onMessageDeleted: (message: MessageDeletedEvent) => void;
+    onConnected: () => void;
 };
 
 export const useRealtimeConnection = ({
@@ -21,6 +22,7 @@ export const useRealtimeConnection = ({
     onMessageCreated,
     onMessageUpdated,
     onMessageDeleted,
+    onConnected,
 }: RealtimeOptions) => {
     useEffect(() => {
         if (!enabled) return;
@@ -41,6 +43,9 @@ export const useRealtimeConnection = ({
 
         const onConnect = () => {
             authRetried = false; // успешно подключились; будущий отказ снова можно обработать
+            // connect срабатывает и после reconnect: REST сверит события, пропущенные без соединения.
+            // Первый connect тоже важен: initial GET мог закончиться до подключения socket.
+            onConnected();
             if (import.meta.env.DEV) console.debug(`[socket] connected: ${socket.id}`);
         };
         const onDisconnect = (reason: string) => {
@@ -94,5 +99,5 @@ export const useRealtimeConnection = ({
             socket.off("message:deleted", onMessageDeleted);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
         };
-    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageUpdated, onMessageDeleted]); // выбранный conversation не влияет на соединение
+    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageUpdated, onMessageDeleted, onConnected]); // выбранный conversation не влияет на соединение
 };

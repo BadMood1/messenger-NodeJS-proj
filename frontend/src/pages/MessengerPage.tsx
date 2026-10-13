@@ -28,6 +28,8 @@ export const MessengerPage = () => {
         messages,
         messagesLoading,
         messagesError,
+        historySyncError,
+        requestHistorySync,
         isLoadingOlder,
         olderMessagesError,
         messagesContainerRef,
@@ -53,6 +55,7 @@ export const MessengerPage = () => {
         onMessageCreated: handleMessageCreated, // socket получает событие, message hook обновляет messages
         onMessageUpdated: handleMessageUpdated,
         onMessageDeleted: handleMessageDeleted,
+        onConnected: requestHistorySync,
     });
 
     const handleSelectConversation = (conversationId: string) => {
@@ -130,6 +133,8 @@ export const MessengerPage = () => {
                 messages={messages}
                 messagesLoading={messagesLoading}
                 messagesError={messagesError}
+                historySyncError={historySyncError}
+                onRetryHistorySync={requestHistorySync}
                 currentUserId={user?.id ?? null}
                 onSendMessage={sendMessage}
                 onRetryMessage={retryMessage}

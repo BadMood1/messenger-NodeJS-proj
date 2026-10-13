@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { applyKnownMessageChanges, mergeMessage } from "./message-state-updates";
+import { applyKnownMessageChanges, mergeMessage, reconcileMessageHistory } from "./message-state-updates";
+import { reloadMessageHistory } from "./reload-message-history";
 import { useMessageScrollPosition } from "./useMessageScrollPosition";
 import {
     deleteMessage as deleteMessageRequest,
@@ -31,6 +32,7 @@ export const useConversationMessages = ({
     // Чтобы не показывать с другого чата при смене его
     const [historyConversationId, setHistoryConversationId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ClientMessage[]>([]);
+    const messagesRef = useRef(messages); // текущий список для стабильного обработчика reconnect
     // Id сообщ., которые прямо сейчас отправляются
     const sendingIdsRef = useRef(new Set<string>());
     const historyVersionRef = useRef(0);
@@ -42,6 +44,12 @@ export const useConversationMessages = ({
     const editedMessagesRef = useRef(new Map<string, Message>());
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [messagesError, setMessagesError] = useState<string | null>(null);
+    const [historySyncError, setHistorySyncError] = useState<string | null>(null);
+    const [historySyncRequest, setHistorySyncRequest] = useState<{
+        conversationId: string;
+        historyVersion: number;
+    } | null>(null);
+    const historySyncControllerRef = useRef<AbortController | null>(null);
 
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
@@ -64,13 +72,17 @@ export const useConversationMessages = ({
         editedMessagesRef.current.clear();
     }, [conversationId]);
 
+    useLayoutEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+
     const {
         messagesContainerRef,
         scrollToBottomAfterUpdate,
         isNearBottom,
         isNearTop,
         resetScrollPosition,
-        saveScrollBeforePrepend,
+        saveScrollBeforeUpdate,
         clearPrependScrollSnapshot,
     } = useMessageScrollPosition(messages);
 
@@ -131,6 +143,17 @@ export const useConversationMessages = ({
         [enabled, applyKnownChanges],
     );
 
+    // Socket вызывает только этот обработчик; state, REST и pagination остаются в message hook.
+    const requestHistorySync = useCallback(() => {
+        const currentConversationId = conversationIdRef.current;
+        if (!currentConversationId) return;
+        // запускает effect ниже
+        setHistorySyncRequest({
+            conversationId: currentConversationId,
+            historyVersion: historyVersionRef.current,
+        });
+    }, []);
+
     // Первая страница сообщений
     useEffect(() => {
         loadOlderControllerRef.current?.abort();
@@ -149,6 +172,7 @@ export const useConversationMessages = ({
             setHistoryConversationId(conversationId);
             setMessages([]);
             setMessagesError(null);
+            setHistorySyncError(null);
             setNextCursor(null);
             setHasMore(false);
             setIsLoadingOlder(false);
@@ -203,6 +227,109 @@ export const useConversationMessages = ({
         applyKnownChanges,
     ]);
 
+    // обновляет историю открытого чата по данным БД: добавляет пропущенные сообщения, подставляет актуальный текст и убирает удалённые записи.
+    //  Он вызывает reloadMessageHistory, объединяет результат с текущим state, сохраняя локальные отправки и свежие socket-события, и обновляет cursor pagination.
+    // При этом сохраняет позицию скролла, не применяет результат к другому чату и при ошибке оставляет текущую историю с возможностью Retry.
+    useEffect(() => {
+        if (
+            !enabled ||
+            !historySyncRequest ||
+            messagesLoading ||
+            initialLoadingRef.current ||
+            historySyncRequest.conversationId !== conversationId ||
+            historySyncRequest.historyVersion !== historyVersionRef.current
+        ) {
+            return;
+        }
+
+        const controller = new AbortController();
+        historySyncControllerRef.current = controller;
+        // Старый load-older не должен дописать страницу поверх перечитанной истории.
+        loadOlderControllerRef.current?.abort();
+        loadOlderControllerRef.current = null;
+        isLoadingOlderRef.current = false;
+        setIsLoadingOlder(false);
+        setHistorySyncError(null);
+
+        //  сообщения которые были на сервере до reload (исключ. sending/failed)
+        const serverMessagesBeforeReload = messagesRef.current.filter((message) => !message.localStatus);
+        const serverIdsBeforeReload = new Set(serverMessagesBeforeReload.map((message) => message.id));
+        const oldestLoadedAt = serverMessagesBeforeReload[0]?.createdAt;
+        const isCurrent = () =>
+            !controller.signal.aborted && // не отменён эффект
+            conversationIdRef.current === historySyncRequest.conversationId && // нужный чат
+            historyVersionRef.current === historySyncRequest.historyVersion; // нужная версия истории
+
+        // получаем свежую историю
+        const syncHistory = async () => {
+            try {
+                // Перечитываем историю сообщений с БД
+                const result = await reloadMessageHistory(
+                    historySyncRequest.conversationId,
+                    authenticatedRequest,
+                    oldestLoadedAt, // грузит до самой старой даты которая уже была в UI
+                    controller.signal,
+                );
+                if (!isCurrent()) return;
+
+                // ------- Получили историю -> обнаруживаем пропущенные удаления -------
+                const reloadedIds = new Set(result.messages.map((message) => message.id));
+                // Если загруженный id отсутствует во всём перечитанном участке — сообщение удалили пока мы были offline.
+                for (const id of serverIdsBeforeReload) {
+                    if (!reloadedIds.has(id)) {
+                        deletedMessageIdsRef.current.add(id);
+                        editedMessagesRef.current.delete(id);
+                    }
+                }
+
+                // Внизу остаёмся внизу. При чтении истории сохраняем видимое сообщение перед заменой DOM.
+                if (isNearBottom()) {
+                    scrollToBottomAfterUpdate();
+                } else {
+                    saveScrollBeforeUpdate();
+                }
+
+                setMessages((messagesNow) =>
+                    // применяем edit, delete, если есть
+                    applyKnownChanges(
+                        // собрали новую историю сообщ., сохранили локальные отправки и reloaded сообщения, убрали дубли и отсортировали по времени
+                        reconcileMessageHistory(messagesNow, result.messages, serverIdsBeforeReload),
+                    ),
+                );
+
+                setNextCursor(result.nextCursor);
+                setHasMore(result.hasMore);
+                setMessagesError(null);
+                setOlderMessagesError(null);
+            } catch (requestError) {
+                // При неудачной сверке не очищаем историю и локальные сообщения; пользователь может нажать Retry.
+                if (isCurrent()) {
+                    setHistorySyncError(
+                        requestError instanceof Error ? requestError.message : "Failed to sync messages",
+                    );
+                }
+            } finally {
+                if (historySyncControllerRef.current === controller) historySyncControllerRef.current = null;
+            }
+        };
+        void syncHistory();
+
+        return () => {
+            controller.abort();
+            if (historySyncControllerRef.current === controller) historySyncControllerRef.current = null;
+        };
+    }, [
+        historySyncRequest,
+        messagesLoading,
+        conversationId,
+        enabled,
+        authenticatedRequest,
+        applyKnownChanges,
+        isNearBottom,
+        scrollToBottomAfterUpdate,
+        saveScrollBeforeUpdate,
+    ]);
+
     // Вызываем из ChatPanel при скролле
     const handleMessagesScroll = () => {
         const currentConversationId = conversationIdRef.current;
@@ -214,6 +341,7 @@ export const useConversationMessages = ({
             !hasMore ||
             !nextCursor ||
             isLoadingOlderRef.current ||
+            historySyncControllerRef.current ||
             !enabled
         ) {
             return;
@@ -261,7 +389,7 @@ export const useConversationMessages = ({
 
                 // За время запроса пользователь мог прокрутить дальше или отправить сообщение.
                 // Поэтому снимаем текущую геометрию только сейчас, перед изменением messages.
-                saveScrollBeforePrepend();
+                saveScrollBeforeUpdate();
 
                 setMessages((currentMessages) => {
                     const currentIds = new Set(currentMessages.map((message) => message.id));
@@ -444,6 +572,8 @@ export const useConversationMessages = ({
         messages: isCurrentHistory ? messages : [],
         messagesLoading: Boolean(conversationId && enabled) && (!isCurrentHistory || messagesLoading),
         messagesError: isCurrentHistory ? messagesError : null,
+        historySyncError: isCurrentHistory ? historySyncError : null,
+        requestHistorySync,
         isLoadingOlder: isCurrentHistory && isLoadingOlder,
         olderMessagesError: isCurrentHistory ? olderMessagesError : null,
         messagesContainerRef,

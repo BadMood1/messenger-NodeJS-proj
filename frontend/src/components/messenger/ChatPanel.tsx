@@ -30,6 +30,8 @@ type ChatPanelProps = {
     messages: ClientMessage[];
     messagesLoading: boolean;
     messagesError: string | null;
+    historySyncError: string | null;
+    onRetryHistorySync: () => void;
     currentUserId: string | null;
     onSendMessage: (content: string, replyTo?: Message) => void;
     onRetryMessage: (messageId: string) => void;
@@ -56,6 +58,8 @@ export const ChatPanel = ({
     messages,
     messagesLoading,
     messagesError,
+    historySyncError,
+    onRetryHistorySync,
     currentUserId,
     onSendMessage,
     onRetryMessage,
@@ -291,6 +295,15 @@ export const ChatPanel = ({
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
+                {historySyncError && (
+                    <div className="mb-2 flex items-center justify-between gap-3 text-xs text-rose-600 dark:text-rose-300" role="alert">
+                        <span className="min-w-0">{historySyncError}</span>
+                        <button type="button" onClick={onRetryHistorySync}
+                            className="shrink-0 cursor-pointer rounded-md px-2 py-1 font-medium transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                            Retry
+                        </button>
+                    </div>
+                )}
                 {replyingMessage && (
                     <div className="mb-2 flex items-center gap-3" aria-label="Reply preview">
                         <blockquote className="flux-reply-preview min-w-0 flex-1">
