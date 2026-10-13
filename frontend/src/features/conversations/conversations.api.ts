@@ -8,12 +8,21 @@ export type ConversationUser = {
     image: string | null;
 };
 
+export type ConversationLastMessage = {
+    id: string;
+    content: string;
+    createdAt: string;
+    updatedAt: string;
+    senderId: string;
+};
+
 export type Conversation = {
     id: string;
     type: "DIRECT";
     createdAt: string;
     updatedAt: string;
     user: ConversationUser | null;
+    lastMessage: ConversationLastMessage | null;
 };
 
 type ConversationsResponse = {
@@ -24,7 +33,9 @@ type GetConversationsOptions = {
     signal?: AbortSignal;
 };
 
+// Получает функцию авторизованных запросов и сигнал отмены.
 // Загружаем доступные текущему пользователю DIRECT-диалоги.
+// Возвращает список с последними сообщениями или выбрасывает ошибку запроса.
 export const getConversations = async (
     authenticatedRequest: AuthenticatedRequest,
     { signal }: GetConversationsOptions = {},

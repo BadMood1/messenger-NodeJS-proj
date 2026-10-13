@@ -9,6 +9,8 @@
 
 ### List my direct conversations
 # Each item contains the other participant in the `user` field.
+# lastMessage: { id, content, createdAt, updatedAt, senderId }, or null for an empty chat.
+# Sorted by lastMessage.createdAt, using conversation.createdAt for empty chats.
 GET {{baseUrl}}/api/conversations
 Authorization: Bearer {{accessToken}}
 

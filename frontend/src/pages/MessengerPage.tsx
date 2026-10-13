@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "../components/messenger/ChatPanel";
 import { ConversationSidebar } from "../components/messenger/ConversationSidebar";
@@ -6,6 +6,7 @@ import { NavRail } from "../components/messenger/NavRail";
 import { useAuth } from "../features/auth/useAuth";
 import { useConversations } from "../features/conversations/useConversations";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
+import type { Message, MessageDeletedEvent } from "../features/messages/messages.api";
 import { useRealtimeConnection } from "../features/realtime/useRealtimeConnection";
 
 export const MessengerPage = () => {
@@ -15,7 +16,15 @@ export const MessengerPage = () => {
     const isAuthenticated = Boolean(accessToken);
 
     // Берём данные о диалогах из нашего хука
-    const { conversations, loading, error } = useConversations({
+    const {
+        conversations,
+        loading,
+        error,
+        refreshError,
+        requestConversationsReload,
+        handleConversationMessage,
+        handleConversationMessageDeleted,
+    } = useConversations({
         enabled: isAuthenticated,
         authenticatedRequest,
     });
@@ -48,13 +57,46 @@ export const MessengerPage = () => {
         currentUser: user,
     });
 
+    // Получает новое сообщение из socket.
+    // Передаёт его в историю открытого чата и в список диалогов.
+    // Обновляет оба участка UI одним событием.
+    const onMessageCreated = useCallback(
+        (message: Message) => {
+            handleMessageCreated(message); // обновл. историю
+            handleConversationMessage(message); // обновл. sidebar
+        },
+        [handleMessageCreated, handleConversationMessage],
+    );
+
+    // Получает изменённое сообщение из socket.
+    // Передаёт правку в историю и в preview диалога.
+    // Обновляет текст, не меняя дату отправки сообщения.
+    const onMessageUpdated = useCallback(
+        (message: Message) => {
+            handleMessageUpdated(message);
+            handleConversationMessage(message);
+        },
+        [handleMessageUpdated, handleConversationMessage],
+    );
+
+    // Получает id удалённого сообщения и его чата из socket.
+    // Передаёт удаление в историю и в обработчик списка диалогов.
+    // Убирает сообщение из чата и обновляет последний текст sidebar.
+    const onMessageDeleted = useCallback(
+        (message: MessageDeletedEvent) => {
+            handleMessageDeleted(message);
+            handleConversationMessageDeleted(message);
+        },
+        [handleMessageDeleted, handleConversationMessageDeleted],
+    );
+
     useRealtimeConnection({
         enabled: isAuthenticated,
         getAccessToken,
         resolveAccessTokenAfter401,
-        onMessageCreated: handleMessageCreated, // socket получает событие, message hook обновляет messages
-        onMessageUpdated: handleMessageUpdated,
-        onMessageDeleted: handleMessageDeleted,
+        onMessageCreated, // socket получает событие, message hook обновляет messages
+        onMessageUpdated,
+        onMessageDeleted,
         onConnected: requestHistorySync,
     });
 
@@ -122,6 +164,8 @@ export const MessengerPage = () => {
                 conversations={conversations}
                 loading={loading}
                 error={error}
+                refreshError={refreshError}
+                onRetryConversations={requestConversationsReload}
                 selectedConversationId={selectedConversationId}
                 onSelectConversation={handleSelectConversation}
             />

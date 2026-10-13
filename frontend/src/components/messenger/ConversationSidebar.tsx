@@ -6,6 +6,8 @@ type ConversationSidebarProps = {
     conversations: Conversation[];
     loading: boolean;
     error: string | null;
+    refreshError: string | null;
+    onRetryConversations: () => void;
     selectedConversationId: string | null;
     onSelectConversation: (id: string) => void;
 };
@@ -20,9 +22,11 @@ const getInitials = (name: string) => {
         .join("");
 };
 
+// Получает дату последнего сообщения или дату создания пустого диалога.
 // Для сегодняшнего диалога показываем время, для более старого — дату.
-const formatConversationTime = (updatedAt: string) => {
-    const date = new Date(updatedAt);
+// Возвращает отформатированную строку для sidebar.
+const formatConversationTime = (createdAt: string) => {
+    const date = new Date(createdAt);
 
     if (Number.isNaN(date.getTime())) {
         return "";
@@ -46,7 +50,9 @@ const formatConversationTime = (updatedAt: string) => {
     }).format(date);
 };
 
+// Получает диалог, признак выбора и обработчик открытия чата.
 // Отображает одного собеседника из полученной conversation.
+// Возвращает кнопку с аватаром, последним сообщением и временем.
 const ConversationRow = ({
     conversation,
     selected,
@@ -57,7 +63,8 @@ const ConversationRow = ({
     onSelect: (id: string) => void;
 }) => {
     const displayName = conversation.user?.name || conversation.user?.username || "Unknown user";
-    const preview = conversation.user ? `@${conversation.user.username}` : "User unavailable";
+    const preview = conversation.lastMessage?.content ?? "No messages yet";
+    const activityAt = conversation.lastMessage?.createdAt ?? conversation.createdAt;
 
     return (
         <button
@@ -83,8 +90,8 @@ const ConversationRow = ({
                     <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5 text-slate-800 dark:text-slate-100">
                         {displayName}
                     </p>
-                    <time className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
-                        {formatConversationTime(conversation.updatedAt)}
+                    <time dateTime={activityAt} className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                        {formatConversationTime(activityAt)}
                     </time>
                 </div>
 
@@ -100,6 +107,8 @@ export const ConversationSidebar = ({
     conversations,
     loading,
     error,
+    refreshError,
+    onRetryConversations,
     selectedConversationId,
     onSelectConversation,
 }: ConversationSidebarProps) => (
@@ -135,6 +144,15 @@ export const ConversationSidebar = ({
         </header>
 
         <div className="flux-conversation-list">
+            {refreshError && (
+                <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-rose-600 dark:text-rose-300" role="alert">
+                    <span className="min-w-0">{refreshError}</span>
+                    <button type="button" onClick={onRetryConversations}
+                        className="shrink-0 cursor-pointer rounded-md px-2 py-1 font-medium transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                        Retry
+                    </button>
+                </div>
+            )}
             {/* Показываем только одно состояние списка за раз. */}
             {loading ? (
                 <div className="flux-conversation-state" role="status">

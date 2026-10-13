@@ -59,6 +59,9 @@ export const getOrCreateDirectConversation = async (currentUserId: string, other
     });
 };
 
+// Получает id текущего пользователя.
+// Загружает его DIRECT-диалоги, собеседников и по одному последнему сообщению.
+// Возвращает диалоги от новых к старым по дате сообщения или создания пустого чата.
 export const getDirectConversations = async (userId: string) => {
     // Берём только DIRECT-чаты, где состоит текущий пользователь
     const conversations = await prisma.conversation.findMany({
@@ -85,15 +88,24 @@ export const getDirectConversations = async (userId: string) => {
                     },
                 },
             },
+            // Для preview берём только последнее сообщение каждого диалога.
+            messages: {
+                select: {
+                    id: true,
+                    content: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    senderId: true,
+                },
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                take: 1,
+            },
         },
 
-        // Сначала более свежие диалоги
-        orderBy: {
-            updatedAt: "desc",
-        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
 
-    return conversations.map((conversation) => {
+    const conversationsWithLastMessage = conversations.map((conversation) => {
         // В DIRECT нас двое, поэтому ищем участника, который не мы
         const otherMember = conversation.members.find((member) => member.userId !== userId);
 
@@ -105,6 +117,17 @@ export const getDirectConversations = async (userId: string) => {
 
             // На front нужен второй пользователь, а не весь массив members
             user: otherMember?.user ?? null,
+            lastMessage: conversation.messages[0] ?? null,
         };
+    });
+
+    // Сначала более свежие диалоги.
+    // Сравниваем дату последнего сообщения; если сообщений нет — дату создания диалога.
+    // Возвращаем список от более новых дат к старым.
+    return conversationsWithLastMessage.sort((firstConversation, secondConversation) => {
+        const firstDate = firstConversation.lastMessage?.createdAt ?? firstConversation.createdAt;
+        const secondDate = secondConversation.lastMessage?.createdAt ?? secondConversation.createdAt;
+
+        return secondDate.getTime() - firstDate.getTime();
     });
 };
