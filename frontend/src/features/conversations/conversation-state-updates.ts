@@ -5,6 +5,7 @@ export type ConversationMessageEvent =
     | { type: "message"; message: Message }
     | { type: "deleted"; message: MessageDeletedEvent };
 
+// ------- СОРТИРОВКА ДИАЛОГОВ -------
 // Получает список диалогов.
 // Сортирует по дате последнего сообщения, а пустые чаты — по дате создания.
 // Возвращает новый список от более новых диалогов к старым.
@@ -22,6 +23,7 @@ export const sortConversationsByLastMessage = (conversations: Conversation[]): C
         return secondConversation.id.localeCompare(firstConversation.id);
     });
 
+// ------- ОБНОВЛЕНИЕ ПОСЛЕДНЕГО СООБЩЕНИЯ -------
 // Получает список диалогов и созданное или изменённое сообщение.
 // Обновляет preview нужного чата, если сообщение не старее текущего последнего.
 // Возвращает список с актуальным текстом и порядком диалогов.
@@ -62,6 +64,7 @@ export const updateConversationLastMessage = (
     return sortConversationsByLastMessage(updatedConversations);
 };
 
+// ------- УДАЛЕНИЕ PREVIEW -------
 // Получает список диалогов и id удалённого сообщения с id его чата.
 // Убирает preview, если удалили именно последнее сообщение этого диалога.
 // Возвращает список без удалённого текста; предыдущее сообщение загрузит REST.
@@ -77,6 +80,7 @@ export const clearDeletedConversationPreview = (
     return sortConversationsByLastMessage(updatedConversations);
 };
 
+// ------- ПРИМЕНЕНИЕ СОБЫТИЯ -------
 // Получает список диалогов и одно сохранённое событие сообщения.
 // Применяет новое сообщение, правку или удаление к preview нужного чата.
 // Возвращает обновлённый список для sidebar.

@@ -14,6 +14,7 @@ type UseConversationsOptions = {
 // Загружает диалоги и обновляет их preview по событиям сообщений.
 // Возвращает список, состояния загрузки и обработчики realtime.
 export const useConversations = ({ enabled, authenticatedRequest }: UseConversationsOptions) => {
+    // ------- СОСТОЯНИЯ И REFS -------
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(enabled);
     const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
     const eventsDuringLoadRef = useRef<ConversationMessageEvent[]>([]); // события полученные во время GET
     const deletedMessageIdsRef = useRef(new Set<string>()); // id сообщений, которые были удалены ( уже знаем )
 
+    // ------- ОБНОВЛЕНИЕ СПИСКА -------
     // Получает новый список диалогов.
     // Сохраняет его для обработчиков событий и для React одновременно.
     // Обновляет sidebar через state.
@@ -34,9 +36,10 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         setConversations(nextConversations);
     }, []);
 
+    // ------- ЗАПРОС ПОВТОРНОЙ ЗАГРУЗКИ -------
     // Получает запрос на повторную загрузку списка диалогов.
     // Запускает GET, а если GET уже идёт — ставит одну загрузку в очередь.
-    // Обновляет список через effect без параллельных запросов.
+    // Обновляет список через effect(ниже) без параллельных запросов.
     const requestConversationsReload = useCallback(() => {
         if (!enabled) return;
         if (controllerRef.current) {
@@ -68,6 +71,7 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         [enabled, updateConversationList, requestConversationsReload],
     );
 
+    // ------- ОБРАБОТКА УДАЛЕНИЯ -------
     // Получает id удалённого сообщения и id его чата.
     // Убирает удалённый preview и запрашивает предыдущее сообщение через REST.
     // Обновляет только список диалогов, не историю открытого чата.
@@ -89,7 +93,9 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         [enabled, updateConversationList, requestConversationsReload],
     );
 
+    // ------- ЗАГРУЗКА СПИСКА ЧЕРЕЗ REST -------
     // Первая загрузка списка диалогов и повторная загрузка по кнопке Retry.
+    // Также обновляет список после connect/reconnect и событий, которым понадобился GET.
     useEffect(() => {
         if (!enabled) {
             return;
@@ -163,6 +169,7 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         };
     }, [authenticatedRequest, enabled, reloadVersion, updateConversationList]);
 
+    // ------- ДАННЫЕ ДЛЯ СТРАНИЦЫ -------
     // После выхода не показываем данные, оставшиеся в памяти от прошлого токена.
     return {
         conversations: enabled ? conversations : [],

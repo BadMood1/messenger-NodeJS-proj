@@ -10,11 +10,13 @@ import type { Message, MessageDeletedEvent } from "../features/messages/messages
 import { useRealtimeConnection } from "../features/realtime/useRealtimeConnection";
 
 export const MessengerPage = () => {
+    // ------- AUTH И СОСТОЯНИЕ СТРАНИЦЫ -------
     const { user, accessToken, authenticatedRequest, getAccessToken, resolveAccessTokenAfter401 } = useAuth();
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
     const shellRef = useRef<HTMLElement | null>(null); // ссылка на элемент main
     const isAuthenticated = Boolean(accessToken);
 
+    // ------- СПИСОК ДИАЛОГОВ -------
     // Берём данные о диалогах из нашего хука
     const {
         conversations,
@@ -32,6 +34,7 @@ export const MessengerPage = () => {
     const selectedConversation =
         conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
 
+    // ------- ИСТОРИЯ ОТКРЫТОГО ЧАТА -------
     // Данные сообщений из хука
     const {
         messages,
@@ -57,6 +60,7 @@ export const MessengerPage = () => {
         currentUser: user,
     });
 
+    // ------- SOCKET-СОБЫТИЯ СООБЩЕНИЙ -------
     // Получает новое сообщение из socket.
     // Передаёт его в историю открытого чата и в список диалогов.
     // Обновляет оба участка UI одним событием.
@@ -90,6 +94,16 @@ export const MessengerPage = () => {
         [handleMessageDeleted, handleConversationMessageDeleted],
     );
 
+    // ------- СИНХРОНИЗАЦИЯ ПОСЛЕ CONNECT / RECONNECT -------
+    // Получает сигнал об успешном подключении socket.
+    // Запрашивает актуальную историю открытого чата и список диалогов.
+    // Обновляет сообщения и sidebar после первого connect или reconnect.
+    const onConnected = useCallback(() => {
+        requestHistorySync(); // сверка истории открытого чата
+        requestConversationsReload(); // обновление списка диалогов
+    }, [requestHistorySync, requestConversationsReload]);
+
+    // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     useRealtimeConnection({
         enabled: isAuthenticated,
         getAccessToken,
@@ -97,15 +111,17 @@ export const MessengerPage = () => {
         onMessageCreated, // socket получает событие, message hook обновляет messages
         onMessageUpdated,
         onMessageDeleted,
-        onConnected: requestHistorySync,
+        onConnected,
     });
 
+    // ------- ВЫБОР ДИАЛОГА -------
     const handleSelectConversation = (conversationId: string) => {
         if (conversationId !== selectedConversationId) {
             setSelectedConversationId(conversationId);
         }
     };
 
+    // ------- ВЫСОТА MOBILE VIEWPORT -------
     // Для правильной высоты на мобилке, когда откр. экранная клавиатура
     useEffect(() => {
         const viewport = window.visualViewport; // видимая пользователю обл. экрана
@@ -122,6 +138,7 @@ export const MessengerPage = () => {
         return () => viewport.removeEventListener("resize", updateHeight);
     }, []);
 
+    // ------- ЗАКРЫТИЕ ЧАТА ПО ESC -------
     // ESC закрывает выбранный чат; message hook сам очистит его историю.
     useEffect(() => {
         const closeConversationOnEscape = (event: KeyboardEvent) => {
@@ -151,6 +168,7 @@ export const MessengerPage = () => {
         };
     }, []);
 
+    // ------- РЕНДЕР СТРАНИЦЫ -------
     return (
         // data-chat-open даёт css понять открыт ли чат, потом в css в зависимости от значения применяем display(none/flex)
         <main ref={shellRef} className="flux-messenger-shell" data-chat-open={Boolean(selectedConversation)}>
