@@ -42,6 +42,9 @@ type ChatPanelProps = {
     isLoadingOlder: boolean;
     olderMessagesError: string | null;
     onBack: () => void;
+    isPeerTyping: boolean;
+    onComposerTyping: (content: string) => void;
+    onStopTyping: () => void;
 };
 
 const getInitials = (name: string) => {
@@ -70,6 +73,9 @@ export const ChatPanel = ({
     isLoadingOlder,
     olderMessagesError,
     onBack,
+    isPeerTyping,
+    onComposerTyping,
+    onStopTyping,
 }: ChatPanelProps) => {
     const conversationUser = conversation?.user;
 
@@ -95,6 +101,7 @@ export const ChatPanel = ({
     // Edit
     const startEditing = (message: Message) => {
         if (submittingRef.current) return;
+        onStopTyping(); // Edit не сообщает собеседнику о наборе нового сообщения
 
         // Сохраняем незавершённый черновик, чтобы вернуть его после Save/Cancel.
         if (!editingMessage) draftRef.current = content;
@@ -183,6 +190,7 @@ export const ChatPanel = ({
                 setEditingMessage(null);
                 setContent(draftRef.current);
             } else {
+                onStopTyping();
                 onSendMessage(trimmedContent, replyingMessage ?? undefined);
                 setContent("");
                 // Текст и reply уже сохранены в optimistic bubble, включая случай ошибки POST.
@@ -237,8 +245,10 @@ export const ChatPanel = ({
                         <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 max-lg:truncate">
-                            @{conversationUser.username}
+                        <p aria-live="polite" className={`mt-0.5 text-xs transition-colors duration-150 motion-reduce:transition-none max-lg:truncate ${
+                            isPeerTyping ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
+                        }`}>
+                            {isPeerTyping ? "печатает…" : `@${conversationUser.username}`}
                         </p>
                     </div>
                 </div>
@@ -342,7 +352,12 @@ export const ChatPanel = ({
                         placeholder={`Message ${conversationUser.name}...`}
                         aria-label={editingMessage ? "Edit message" : `Message ${conversationUser.name}`}
                         value={content}
-                        onChange={(event) => setContent(event.target.value)}
+                        onChange={(event) => {
+                            const nextContent = event.target.value;
+                            setContent(nextContent);
+                            if (!editingMessage) onComposerTyping(nextContent);
+                        }}
+                        onBlur={onStopTyping}
                         readOnly={isSubmitting}
                         onKeyDown={(event) => {
                             if (event.key === "Escape" && editingMessage) {

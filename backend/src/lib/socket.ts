@@ -3,6 +3,7 @@ import { Server } from "socket.io";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./prisma.js";
 import type { Message } from "../generated/prisma/client.js";
+import { createTypingHandlers } from "./socket-typing.js";
 
 let socketServer: Server | null = null; // REST-сервис использует тот же io, который создаём при запуске
 
@@ -12,6 +13,7 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
         cors: { origin: frontendOrigin },
     });
     socketServer = io;
+    const registerTypingHandlers = createTypingHandlers(io);
 
     // Handshake содержит JWT, но userId берём только из проверенного sub.
     // io.use(...) — это **middleware для Socket.IO-подключений
@@ -34,6 +36,10 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
     io.on("connection", (socket) => {
         // Все вкладки одного пользователя получают одну server-controlled room.
         socket.join(`user:${socket.data.userId}`); // room для адресной доставки, не запись в БД
+
+        // ------- TYPING: ПРИЁМ СОБЫТИЙ ОТ КЛИЕНТА -------
+        // передаём socket
+        registerTypingHandlers(socket); // userId уже проверен middleware выше
 
         // Отключаем когда истечёт access token
         const expiryTimer = setTimeout(

@@ -104,8 +104,11 @@ export const MessengerPage = () => {
     }, [requestHistorySync, requestConversationsReload]);
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
-    useRealtimeConnection({
+    // дальше эти данные передадим в ChatPannel
+    const { isPeerTyping, notifyTyping, stopTyping } = useRealtimeConnection({
         enabled: isAuthenticated,
+        conversationId: selectedConversationId,
+        conversationUserId: selectedConversation?.user?.id ?? null,
         getAccessToken,
         resolveAccessTokenAfter401,
         onMessageCreated, // socket получает событие, message hook обновляет messages
@@ -207,6 +210,9 @@ export const MessengerPage = () => {
                 isLoadingOlder={isLoadingOlder}
                 olderMessagesError={olderMessagesError}
                 onBack={() => setSelectedConversationId(null)}
+                isPeerTyping={isPeerTyping}
+                onComposerTyping={notifyTyping}
+                onStopTyping={stopTyping}
             />
         </main>
     );
