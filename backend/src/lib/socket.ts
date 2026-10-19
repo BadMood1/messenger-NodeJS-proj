@@ -94,10 +94,12 @@ const getConversationRooms = async (conversationId: string) => {
     return members.map((member) => `user:${member.userId}`);
 };
 
-// Находит участников чата и отправляет им готовое сообщение с данными автора и reply preview
-export const publishMessageCreated = async (message: Message) => {
+// Получает сохранённое сообщение и id участников, уже проверенных сервисом отправки.
+// Формирует их персональные rooms без дополнительного запроса к БД.
+// Отправляет готовое message:created, включая данные автора и reply preview.
+export const publishMessageCreated = async (message: Message, recipientUserIds: string[]) => {
     if (!socketServer) return;
-    const rooms = await getConversationRooms(message.conversationId);
+    const rooms = recipientUserIds.map((userId) => `user:${userId}`);
     // emit получат все socket'ы внутри выбранных rooms — то есть все подключённые вкладки участников.
     if (rooms.length) socketServer.to(rooms).emit("message:created", message);
 };
