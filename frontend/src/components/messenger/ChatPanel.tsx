@@ -43,6 +43,7 @@ type ChatPanelProps = {
     olderMessagesError: string | null;
     onBack: () => void;
     isPeerTyping: boolean;
+    isPeerOnline: boolean | null;
     onComposerTyping: (content: string) => void;
     onStopTyping: () => void;
 };
@@ -74,6 +75,7 @@ export const ChatPanel = ({
     olderMessagesError,
     onBack,
     isPeerTyping,
+    isPeerOnline,
     onComposerTyping,
     onStopTyping,
 }: ChatPanelProps) => {
@@ -219,6 +221,11 @@ export const ChatPanel = ({
         );
     }
 
+    // Пока presence неизвестен, оставляем username. Набор текста имеет приоритет над Online/Offline.
+    let statusText = `@${conversationUser.username}`;
+    if (isPeerOnline !== null) statusText = isPeerOnline ? "Online" : "Offline";
+    if (isPeerTyping) statusText = "печатает…";
+
     return (
         <section className="flux-chat-panel" onKeyDown={(event) => {
             // Escape сначала отменяет Reply, но меню и модалка обрабатывают его сами.
@@ -246,9 +253,9 @@ export const ChatPanel = ({
                             {conversationUser.name}
                         </h2>
                         <p aria-live="polite" className={`mt-0.5 text-xs transition-colors duration-150 motion-reduce:transition-none max-lg:truncate ${
-                            isPeerTyping ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
+                            isPeerTyping || isPeerOnline === true ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
                         }`}>
-                            {isPeerTyping ? "печатает…" : `@${conversationUser.username}`}
+                            {statusText}
                         </p>
                     </div>
                 </div>

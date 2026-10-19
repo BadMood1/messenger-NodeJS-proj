@@ -6,6 +6,7 @@ import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
 import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 import { useConversationTyping } from "./useConversationTyping";
+import { useConversationPresence } from "./useConversationPresence";
 
 // Pick берёт типы двух функций из auth context; & добавляет настройки realtime-хука.
 type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessTokenAfter401"> & {
@@ -29,9 +30,18 @@ export const useRealtimeConnection = ({
     onMessageDeleted,
     onConnected,
 }: RealtimeOptions) => {
-    // ------- TYPING НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
+    // Один socket для сообщений, typing и presence.
     const socketRef = useRef<Socket | null>(null);
+
+    // ------- TYPING НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
     const { isPeerTyping, notifyTyping, stopTyping, handleTyping, resetTyping } = useConversationTyping({
+        socketRef,
+        conversationId,
+        conversationUserId,
+    });
+
+    // ------- PRESENCE НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
+    const { isPeerOnline, requestPresence, handlePresenceUpdated, resetPresence } = useConversationPresence({
         socketRef,
         conversationId,
         conversationUserId,
@@ -54,10 +64,11 @@ export const useRealtimeConnection = ({
                 callback({ token: handshakeToken }); // отдаём Socket.IO для handshake
             },
         });
-        socketRef.current = socket; // typing использует этот же socket, второго соединения нет
+        socketRef.current = socket; // typing и presence используют этот же socket, второго соединения нет
 
         const onConnect = () => {
             authRetried = false; // успешно подключились; будущий отказ снова можно обработать
+            requestPresence(); // после reconnect запрашиваем статус заново: события могли быть пропущены
             // connect срабатывает и после reconnect: REST сверит события, пропущенные без соединения.
             // Первый connect тоже важен: initial GET мог закончиться до подключения socket.
             onConnected();
@@ -65,6 +76,7 @@ export const useRealtimeConnection = ({
         };
         const onDisconnect = (reason: string) => {
             resetTyping(); // после разрыва старый typing не должен оставаться в UI
+            resetPresence(); // статус собеседника неизвестен, пока наше соединение не восстановится
             if (import.meta.env.DEV) console.debug(`[socket] disconnected: ${reason}`);
             // Сервер закрывает socket по exp JWT; такой disconnect не запускает auto-reconnect.
             if (reason === "io server disconnect" && !disposed) socket.connect();
@@ -102,12 +114,14 @@ export const useRealtimeConnection = ({
         socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
         socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
+        socket.on("presence:updated", handlePresenceUpdated); // presence hook проверит id собеседника
 
         socket.connect();
 
         return () => {
             disposed = true; // ожидающий async-код теперь не должен оживлять этот socket
             resetTyping(); // пока соединение открыто, сообщаем об остановке собственного набора
+            resetPresence(); // поздний ack не должен обновлять состояние после ухода со страницы
             // Cleanup закрывает и соединение, и reconnect; StrictMode не оставляет лишний socket.
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
@@ -116,10 +130,24 @@ export const useRealtimeConnection = ({
             socket.off("message:updated", onMessageUpdated);
             socket.off("message:deleted", onMessageDeleted);
             socket.off("conversation:typing", handleTyping);
+            socket.off("presence:updated", handlePresenceUpdated);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
             socketRef.current = null;
         };
-    }, [enabled, getAccessToken, resolveAccessTokenAfter401, onMessageCreated, onMessageUpdated, onMessageDeleted, onConnected, handleTyping, resetTyping]); // выбранный conversation не влияет на соединение
+    }, [
+        enabled,
+        getAccessToken,
+        resolveAccessTokenAfter401,
+        onMessageCreated,
+        onMessageUpdated,
+        onMessageDeleted,
+        onConnected,
+        handleTyping,
+        resetTyping,
+        requestPresence,
+        handlePresenceUpdated,
+        resetPresence,
+    ]); // выбранный conversation не влияет на соединение
 
-    return { isPeerTyping, notifyTyping, stopTyping };
+    return { isPeerTyping, notifyTyping, stopTyping, isPeerOnline };
 };
