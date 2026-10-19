@@ -3,6 +3,8 @@ import { Server } from "socket.io";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./prisma.js";
 import type { Message } from "../generated/prisma/client.js";
+import { createPresenceTracker } from "./socket-presence.js";
+import { createPresenceHandlers } from "./socket-presence-events.js";
 import { createTypingHandlers } from "./socket-typing.js";
 
 let socketServer: Server | null = null; // REST-сервис использует тот же io, который создаём при запуске
@@ -13,6 +15,16 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
         cors: { origin: frontendOrigin },
     });
     socketServer = io;
+    // Создаём общее хранилище для всех подключений, кто online
+    const presence = createPresenceTracker();
+
+    // registerPresenceHandlers — подключить обработчик запроса статуса к конкретному socket;
+    // publishPresenceChanged — разослать текущий статус пользователя его собеседникам.
+    const { registerPresenceHandlers, publishPresenceChanged } = createPresenceHandlers(
+        io,
+        presence.isUserOnline,
+    );
+
     const registerTypingHandlers = createTypingHandlers(io);
 
     // Handshake содержит JWT, но userId берём только из проверенного sub.
@@ -37,6 +49,10 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
         // Все вкладки одного пользователя получают одну server-controlled room.
         socket.join(`user:${socket.data.userId}`); // room для адресной доставки, не запись в БД
 
+        // ------- PRESENCE: АКТИВНЫЕ ПОДКЛЮЧЕНИЯ ПОЛЬЗОВАТЕЛЯ -------
+        presence.registerConnection(socket, publishPresenceChanged); // disconnect сам уберёт этот socket из реестра
+        registerPresenceHandlers(socket); // цепляем обработчик запросов (presence:get событие)
+
         // ------- TYPING: ПРИЁМ СОБЫТИЙ ОТ КЛИЕНТА -------
         // передаём socket
         registerTypingHandlers(socket); // userId уже проверен middleware выше
@@ -52,7 +68,7 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
             console.log(`[socket] connected: ${socket.id}`);
         }
 
-        socket.on("disconnect", (reason) => {
+        socket.once("disconnect", (reason) => {
             clearTimeout(expiryTimer); // socket уже отключён — таймер ему больше не нужен
             if (process.env.NODE_ENV !== "production") {
                 console.log(`[socket] disconnected: ${socket.id}, ${reason}`);
