@@ -50,6 +50,7 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
         socket.join(`user:${socket.data.userId}`); // room для адресной доставки, не запись в БД
 
         // ------- PRESENCE: АКТИВНЫЕ ПОДКЛЮЧЕНИЯ ПОЛЬЗОВАТЕЛЯ -------
+        // добавл. сокет в реестр online, только если вкладка видима и в фокусе
         presence.registerConnection(socket, publishPresenceChanged); // disconnect сам уберёт этот socket из реестра
         registerPresenceHandlers(socket); // цепляем обработчик запросов (presence:get событие)
 

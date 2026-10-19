@@ -41,33 +41,54 @@ export const useRealtimeConnection = ({
     });
 
     // ------- PRESENCE НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
-    const { isPeerOnline, requestPresence, handlePresenceUpdated, resetPresence } = useConversationPresence({
-        socketRef,
-        conversationId,
-        conversationUserId,
-    });
+    const { isPeerOnline, peerLastSeenAt, requestPresence, handlePresenceUpdated, resetPresence } =
+        useConversationPresence({
+            socketRef,
+            conversationId,
+            conversationUserId,
+        });
 
     // ------- ПОДКЛЮЧЕНИЕ И AUTH -------
     useEffect(() => {
         if (!enabled) return;
 
-        let disposed = false; // станет true в cleanup: этот socket больше не нужен
+        let disposed = false; // флаг "это соединение больше не используем"
         let refreshing = false; // прямо сейчас ждём результат общего refresh/resolver
         let authRetried = false; // уже пробовали восстановить auth; не запускаем бесконечные retry
         let handshakeToken: string | null = null; // JWT именно последней попытки подключения
+        let lastSentActivity: boolean | null = null; // не отправляем одинаковые focus/visibility-события подряд
         // Соединение принадлежит Messenger, а не выбранному чату.
+
         const socket = io(SOCKET_URL, {
             autoConnect: false, // сначала регистрируем обработчики, потом вызываем connect()
             // auth ф-ция даёт данные серверу при подключении
             auth: (callback) => {
                 handshakeToken = getAccessToken(); // callback выполняется и при reconnect: берём свежий JWT
-                callback({ token: handshakeToken }); // отдаём Socket.IO для handshake
+                callback({
+                    token: handshakeToken,
+                    isActive: !document.hidden && document.hasFocus(),
+                }); // отдаём Socket.IO для handshake, в том числе при reconnect
             },
         });
         socketRef.current = socket; // typing и presence используют этот же socket, второго соединения нет
 
+        // Вызывается при connect, focus, blur и смене видимости вкладки.
+        // Передаёт её активность при изменении; при уходе также останавливает собственный typing.
+        // Соединение оставляет открытым: сообщения продолжают приходить в фоне.
+        const reportActivity = () => {
+            if (disposed || !socket.connected) return;
+            const isActive = !document.hidden && document.hasFocus();
+            if (!isActive) stopTyping();
+            if (lastSentActivity === isActive) return;
+
+            lastSentActivity = isActive;
+            socket.emit("presence:activity", { isActive });
+        };
+
         const onConnect = () => {
             authRetried = false; // успешно подключились; будущий отказ снова можно обработать
+            lastSentActivity = null; // новое соединение должно получить активность, даже если она не менялась
+            reportActivity(); // фокус мог измениться, пока ждали handshake
             requestPresence(); // после reconnect запрашиваем статус заново: события могли быть пропущены
             // connect срабатывает и после reconnect: REST сверит события, пропущенные без соединения.
             // Первый connect тоже важен: initial GET мог закончиться до подключения socket.
@@ -97,8 +118,10 @@ export const useRealtimeConnection = ({
             try {
                 // Не создаём второй refresh flow: используем deduplication из AuthProvider.
                 const token = await resolveAccessTokenAfter401(handshakeToken); // новый JWT или уже обновлённый REST-запросом
-                if (!disposed) { // за время await пользователь мог уйти из Messenger
-                    if (token) socket.connect(); // auth callback снова прочитает JWT из Provider
+                if (!disposed) {
+                    // за время await пользователь мог уйти из Messenger
+                    if (token)
+                        socket.connect(); // auth callback снова прочитает JWT из Provider
                     else socket.disconnect(); // Неуспешный refresh уже очистил auth в Provider.
                 }
             } finally {
@@ -116,12 +139,18 @@ export const useRealtimeConnection = ({
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
         socket.on("presence:updated", handlePresenceUpdated); // presence hook проверит id собеседника
 
+        window.addEventListener("focus", reportActivity); // вернулся в окно
+        window.addEventListener("blur", reportActivity); // окно потеряло фокус
+        document.addEventListener("visibilitychange", reportActivity); // вкладка скрылась / открылась
         socket.connect();
 
         return () => {
             disposed = true; // ожидающий async-код теперь не должен оживлять этот socket
             resetTyping(); // пока соединение открыто, сообщаем об остановке собственного набора
             resetPresence(); // поздний ack не должен обновлять состояние после ухода со страницы
+            window.removeEventListener("focus", reportActivity);
+            window.removeEventListener("blur", reportActivity);
+            document.removeEventListener("visibilitychange", reportActivity);
             // Cleanup закрывает и соединение, и reconnect; StrictMode не оставляет лишний socket.
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
@@ -144,10 +173,11 @@ export const useRealtimeConnection = ({
         onConnected,
         handleTyping,
         resetTyping,
+        stopTyping,
         requestPresence,
         handlePresenceUpdated,
         resetPresence,
     ]); // выбранный conversation не влияет на соединение
 
-    return { isPeerTyping, notifyTyping, stopTyping, isPeerOnline };
+    return { isPeerTyping, notifyTyping, stopTyping, isPeerOnline, peerLastSeenAt };
 };

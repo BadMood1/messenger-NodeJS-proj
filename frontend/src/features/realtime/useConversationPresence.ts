@@ -8,11 +8,13 @@ type PeerPresence = {
     conversationId: string;
     userId: string;
     isOnline: boolean;
+    lastSeenAt: string | null;
 };
 
 type PresenceUpdatedEvent = {
     userId: string;
     isOnline: boolean;
+    lastSeenAt: string | null;
 };
 
 type PresenceResponse = { ok: true; presence: PeerPresence } | { ok: false; error: string };
@@ -24,7 +26,7 @@ type ConversationPresenceOptions = {
 };
 
 // Получает существующий socket, выбранный чат и id собеседника.
-// Запрашивает начальный статус и принимает online/offline из socket-событий.
+// Запрашивает начальный статус и принимает online/offline вместе с lastSeenAt из socket-событий.
 // Возвращает статус собеседника и обработчики запроса, обновления и сброса.
 export const useConversationPresence = ({
     socketRef,
@@ -35,7 +37,7 @@ export const useConversationPresence = ({
     const selectedConversationRef = useRef({ conversationId, conversationUserId });
     // Запрос, live-обновление и сброс меняют версию; ответ старого запроса пропускаем. (счетчик для проверки актуальности)
     const presenceVersionRef = useRef(0);
-    // полученный статус
+    // полученный статус и сохранённое backend время последнего присутствия
     const [peerPresence, setPeerPresence] = useState<PeerPresence | null>(null);
 
     // ------- ЗАПРОС НАЧАЛЬНОГО СТАТУСА -------
@@ -91,9 +93,9 @@ export const useConversationPresence = ({
     }, [socketRef]);
 
     // ------- LIVE-ОБНОВЛЕНИЯ СТАТУСА -------
-    // Получает presence:updated с userId и признаком online/offline.
+    // Получает presence:updated с userId, признаком online/offline и lastSeenAt.
     // Принимает только статус собеседника из открытого чата и отменяет применение старого ack.
-    // Обновляет состояние, из которого header получает Online или Offline.
+    // Обновляет состояние, из которого header получает Online, Last seen или Offline.
     const handlePresenceUpdated = useCallback(
         (event: PresenceUpdatedEvent) => {
             const selectedConversation = selectedConversationRef.current;
@@ -109,6 +111,7 @@ export const useConversationPresence = ({
                 conversationId: selectedConversation.conversationId,
                 userId: event.userId,
                 isOnline: event.isOnline,
+                lastSeenAt: event.lastSeenAt,
             });
         },
         [socketRef],
@@ -132,14 +135,16 @@ export const useConversationPresence = ({
         };
     }, [conversationId, conversationUserId, requestPresence, resetPresence]);
 
+    // До cleanup эффекта уже не показываем статус предыдущего чата.
+    // И online, и время берём только из presence выбранного собеседника.
+    const selectedPeerPresence =
+        peerPresence?.conversationId === conversationId && peerPresence?.userId === conversationUserId
+            ? peerPresence
+            : null;
+
     return {
-        // До cleanup эффекта уже не показываем статус предыдущего чата.
-        isPeerOnline:
-            peerPresence &&
-            peerPresence.conversationId === conversationId &&
-            peerPresence.userId === conversationUserId
-                ? peerPresence.isOnline
-                : null,
+        isPeerOnline: selectedPeerPresence?.isOnline ?? null,
+        peerLastSeenAt: selectedPeerPresence?.lastSeenAt ?? null,
         requestPresence,
         handlePresenceUpdated,
         resetPresence,

@@ -25,6 +25,7 @@ model User {
   username  String   @unique
   email     String   @unique
   image     String?
+  lastSeenAt DateTime? // Последняя сохранённая отметка присутствия; время задаёт сервер.
 
   passwordHash String
 

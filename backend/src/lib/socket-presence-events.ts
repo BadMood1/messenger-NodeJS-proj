@@ -9,39 +9,88 @@ const presenceRequestSchema = z.object({
 });
 
 type PresenceResponse =
-    | { ok: true; presence: { conversationId: string; userId: string; isOnline: boolean } }
+    | {
+          ok: true;
+          presence: {
+              conversationId: string;
+              userId: string;
+              isOnline: boolean;
+              lastSeenAt: string | null;
+          };
+      }
     | { ok: false; error: string };
 
 // Получает Socket.IO-сервер и функцию чтения текущего online-статуса.
 // Создаёт функции запроса статуса собеседника и доставки изменений участникам DIRECT-диалогов.
 // Возвращает регистрацию обработчика и функцию отправки presence:updated.
 export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string) => boolean) => {
+    // Для каждого пользователя запоминаем версию последней начатой смены статуса.
+    // Если во время запроса к БД появилась новая версия, старую рассылку пропускаем.
+    const pendingPresenceVersions = new Map<string, number>();
+    let nextPresenceVersion = 0;
+
     // ------- ДОСТАВКА ИЗМЕНЕНИЙ СТАТУСА -------
-    // Получает id пользователя, у которого подключился первый или отключился последний socket.
-    // Находит его собеседников и отправляет текущий статус во все их подключённые вкладки.
+    // Получает id пользователя и время появления первой либо ухода последней активной вкладки.
+    // Сохраняет lastSeenAt, находит собеседников и отправляет им текущий статус вместе со временем.
     // Завершает доставку без исключения наружу; ошибку БД записывает в серверный лог.
-    const publishPresenceChanged = async (userId: string) => {
+    const publishPresenceChanged = async (userId: string, lastSeenAt: Date) => {
+        const presenceVersion = ++nextPresenceVersion;
+        pendingPresenceVersions.set(userId, presenceVersion);
+
         try {
-            // Берём других участников DIRECT-диалогов этого пользователя, без повторяющихся userId.
-            const recipients = await prisma.conversationMember.findMany({
-                where: {
-                    userId: { not: userId },
-                    conversation: {
-                        type: "DIRECT",
-                        members: { some: { userId } },
+            // Сохранение времени и поиск собеседников не зависят друг от друга — запускаем параллельно.
+            const [updatedUsers, recipients] = await Promise.all([
+                // обновляем lastSeenAt и обновленных юзеров возвращаем
+                // Если в БД уже более новое время, старый запрос его не заменит.
+                prisma.user.updateManyAndReturn({
+                    where: {
+                        id: userId,
+                        OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: lastSeenAt } }],
                     },
-                },
-                select: { userId: true },
-                distinct: ["userId"],
-            });
+                    data: { lastSeenAt },
+                    select: { lastSeenAt: true },
+                }),
+                // Берём других участников DIRECT-диалогов этого пользователя, без повторяющихся userId.
+                prisma.conversationMember.findMany({
+                    where: {
+                        userId: { not: userId },
+                        conversation: {
+                            type: "DIRECT",
+                            members: { some: { userId } },
+                        },
+                    },
+                    select: { userId: true },
+                    distinct: ["userId"], // убрать дубликаты
+                }),
+            ]);
+
+            // Если запрос устарел или уведомлять некого, дополнительное чтение БД не нужно.
+            if (pendingPresenceVersions.get(userId) !== presenceVersion || !recipients.length) return;
+
+            // Если UPDATE вернул пользователя, используем его время без отдельного SELECT.
+            // Если обновления не было (время в БД такое же или новее), читаем сохранённое значение.
+            const user =
+                updatedUsers[0] ??
+                (await prisma.user.findUnique({ where: { id: userId }, select: { lastSeenAt: true } }));
+
+            // Во время findUnique мог начаться новый вызов, чекаем версию
+            if (pendingPresenceVersions.get(userId) !== presenceVersion || !user) return;
+
             const rooms = recipients.map((recipient) => `user:${recipient.userId}`);
-            if (!rooms.length) return;
 
             // За время запроса к БД пользователь мог переподключиться: читаем статус именно сейчас.
-            io.to(rooms).emit("presence:updated", { userId, isOnline: isUserOnline(userId) });
+            io.to(rooms).emit("presence:updated", {
+                userId,
+                isOnline: isUserOnline(userId),
+                lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
+            });
         } catch {
             // Presence вызывается из connection/disconnect без await; не оставляем rejected Promise.
             console.error("[socket] Failed to publish presence");
+        } finally {
+            // Если Map всё ещё хранит номер моего вызова — удаляю эту запись (при этом старый вызов не удалит новый)
+            if (pendingPresenceVersions.get(userId) === presenceVersion)
+                pendingPresenceVersions.delete(userId);
         }
     };
 
@@ -80,7 +129,11 @@ export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string
                         type: "DIRECT",
                         members: { some: { userId } },
                     },
-                    select: { members: { select: { userId: true } } },
+                    select: {
+                        members: {
+                            select: { userId: true, user: { select: { lastSeenAt: true } } },
+                        },
+                    },
                 });
 
                 // После ожидания БД повторно проверяем соединение и срок JWT.
@@ -103,6 +156,7 @@ export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string
                         conversationId: parsed.data.conversationId,
                         userId: otherMember.userId,
                         isOnline: isUserOnline(otherMember.userId),
+                        lastSeenAt: otherMember.user.lastSeenAt?.toISOString() ?? null,
                     },
                 });
             } catch {

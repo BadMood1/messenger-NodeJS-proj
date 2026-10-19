@@ -24,6 +24,7 @@ import {
 } from "../ui/alert-dialog";
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { Message, ClientMessage } from "../../features/messages/messages.api";
+import { formatLastSeen } from "../../features/realtime/format-last-seen";
 
 type ChatPanelProps = {
     conversation: Conversation | null;
@@ -44,6 +45,7 @@ type ChatPanelProps = {
     onBack: () => void;
     isPeerTyping: boolean;
     isPeerOnline: boolean | null;
+    peerLastSeenAt: string | null;
     onComposerTyping: (content: string) => void;
     onStopTyping: () => void;
 };
@@ -76,6 +78,7 @@ export const ChatPanel = ({
     onBack,
     isPeerTyping,
     isPeerOnline,
+    peerLastSeenAt,
     onComposerTyping,
     onStopTyping,
 }: ChatPanelProps) => {
@@ -221,9 +224,9 @@ export const ChatPanel = ({
         );
     }
 
-    // Пока presence неизвестен, оставляем username. Набор текста имеет приоритет над Online/Offline.
+    // Пока presence неизвестен, оставляем username. Набор текста имеет приоритет над Online/Last seen.
     let statusText = `@${conversationUser.username}`;
-    if (isPeerOnline !== null) statusText = isPeerOnline ? "Online" : "Offline";
+    if (isPeerOnline !== null) statusText = isPeerOnline ? "Online" : formatLastSeen(peerLastSeenAt);
     if (isPeerTyping) statusText = "печатает…";
 
     return (
