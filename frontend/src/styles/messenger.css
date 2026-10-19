@@ -116,6 +116,14 @@
         @apply h-10 w-10 text-sm;
     }
 
+    .flux-presence-dot {
+        @apply pointer-events-none absolute bottom-0 right-0 size-3 rounded-full border-2 border-[#f8fbff] bg-blue-500 opacity-0 transition-opacity duration-100 motion-reduce:transition-none dark:border-[#07182a] dark:bg-cyan-400;
+    }
+
+    .flux-presence-dot[data-online="true"] {
+        @apply opacity-100 duration-150;
+    }
+
     .flux-mobile-nav {
         @apply grid min-h-16 shrink-0 grid-cols-3 border-t border-blue-100/80 bg-white/88 px-3 backdrop-blur-md dark:border-white/7 dark:bg-[#071427]/94 lg:hidden;
         padding-bottom: env(safe-area-inset-bottom);

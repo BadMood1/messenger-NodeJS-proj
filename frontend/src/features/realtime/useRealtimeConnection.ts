@@ -4,6 +4,7 @@ import { io, type Socket } from "socket.io-client";
 
 import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
+import type { Conversation } from "../conversations/conversations.api";
 import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 import { useConversationTyping } from "./useConversationTyping";
 import { useConversationPresence } from "./useConversationPresence";
@@ -11,6 +12,7 @@ import { useConversationPresence } from "./useConversationPresence";
 // Pick берёт типы двух функций из auth context; & добавляет настройки realtime-хука.
 type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessTokenAfter401"> & {
     enabled: boolean;
+    conversations: Conversation[];
     conversationId: string | null;
     conversationUserId: string | null;
     onMessageCreated: (message: Message) => void;
@@ -21,6 +23,7 @@ type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessT
 
 export const useRealtimeConnection = ({
     enabled,
+    conversations,
     conversationId,
     conversationUserId,
     getAccessToken,
@@ -41,10 +44,10 @@ export const useRealtimeConnection = ({
     });
 
     // ------- PRESENCE НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
-    const { isPeerOnline, peerLastSeenAt, requestPresence, handlePresenceUpdated, resetPresence } =
+    const { presenceByUserId, isPeerOnline, peerLastSeenAt, requestPresence, handlePresenceUpdated, resetPresence } =
         useConversationPresence({
             socketRef,
-            conversationId,
+            conversations,
             conversationUserId,
         });
 
@@ -97,7 +100,7 @@ export const useRealtimeConnection = ({
         };
         const onDisconnect = (reason: string) => {
             resetTyping(); // после разрыва старый typing не должен оставаться в UI
-            resetPresence(); // статус собеседника неизвестен, пока наше соединение не восстановится
+            resetPresence(); // статусы собеседников неизвестны, пока наше соединение не восстановится
             if (import.meta.env.DEV) console.debug(`[socket] disconnected: ${reason}`);
             // Сервер закрывает socket по exp JWT; такой disconnect не запускает auto-reconnect.
             if (reason === "io server disconnect" && !disposed) socket.connect();
@@ -137,7 +140,7 @@ export const useRealtimeConnection = ({
         socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
         socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
-        socket.on("presence:updated", handlePresenceUpdated); // presence hook проверит id собеседника
+        socket.on("presence:updated", handlePresenceUpdated); // общая Map обновит и sidebar, и header
 
         window.addEventListener("focus", reportActivity); // вернулся в окно
         window.addEventListener("blur", reportActivity); // окно потеряло фокус
@@ -179,5 +182,5 @@ export const useRealtimeConnection = ({
         resetPresence,
     ]); // выбранный conversation не влияет на соединение
 
-    return { isPeerTyping, notifyTyping, stopTyping, isPeerOnline, peerLastSeenAt };
+    return { isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt };
 };

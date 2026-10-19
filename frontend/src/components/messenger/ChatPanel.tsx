@@ -244,18 +244,23 @@ export const ChatPanel = ({
                     <button type="button" className="flux-icon-button lg:hidden" aria-label="Back to conversations" onClick={onBack}>
                         <ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" />
                     </button>
-                    <div className="flux-chat-avatar overflow-hidden">
-                        {conversationUser.image ? (
-                            <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                            getInitials(conversationUser.name) || "?"
-                        )}
+                    <div className="relative shrink-0">
+                        <div className="flux-chat-avatar overflow-hidden">
+                            {conversationUser.image ? (
+                                <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                                getInitials(conversationUser.name) || "?"
+                            )}
+                        </div>
+                        {/* Показываем кружок только при подтверждённом online; null — статус ещё неизвестен. */}
+                        {/* Оставляем элемент в DOM, чтобы opacity плавно менялась и при появлении, и при исчезновении. */}
+                        <span className="flux-presence-dot" data-online={isPeerOnline === true} aria-hidden="true" />
                     </div>
                     <div className="max-lg:min-w-0">
                         <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p aria-live="polite" className={`mt-0.5 text-xs transition-colors duration-150 motion-reduce:transition-none max-lg:truncate ${
+                        <p aria-live="polite" className={`mt-0.5 text-xs max-lg:truncate ${
                             isPeerTyping || isPeerOnline === true ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
                         }`}>
                             {statusText}

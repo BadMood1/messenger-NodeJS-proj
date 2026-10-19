@@ -105,8 +105,9 @@ export const MessengerPage = () => {
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     // дальше эти данные передадим в ChatPannel
-    const { isPeerTyping, notifyTyping, stopTyping, isPeerOnline, peerLastSeenAt } = useRealtimeConnection({
+    const { isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt } = useRealtimeConnection({
         enabled: isAuthenticated,
+        conversations,
         conversationId: selectedConversationId,
         conversationUserId: selectedConversation?.user?.id ?? null,
         getAccessToken,
@@ -183,6 +184,7 @@ export const MessengerPage = () => {
             {/* ==================== CONVERSATIONS ==================== */}
             <ConversationSidebar
                 conversations={conversations}
+                presenceByUserId={presenceByUserId}
                 loading={loading}
                 error={error}
                 refreshError={refreshError}
