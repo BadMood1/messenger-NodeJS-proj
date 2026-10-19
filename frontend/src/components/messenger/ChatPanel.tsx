@@ -24,12 +24,15 @@ import {
 } from "../ui/alert-dialog";
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { Message, ClientMessage } from "../../features/messages/messages.api";
+import { formatLastSeen } from "../../features/realtime/format-last-seen";
 
 type ChatPanelProps = {
     conversation: Conversation | null;
     messages: ClientMessage[];
     messagesLoading: boolean;
     messagesError: string | null;
+    historySyncError: string | null;
+    onRetryHistorySync: () => void;
     currentUserId: string | null;
     onSendMessage: (content: string, replyTo?: Message) => void;
     onRetryMessage: (messageId: string) => void;
@@ -40,6 +43,11 @@ type ChatPanelProps = {
     isLoadingOlder: boolean;
     olderMessagesError: string | null;
     onBack: () => void;
+    isPeerTyping: boolean;
+    isPeerOnline: boolean | null;
+    peerLastSeenAt: string | null;
+    onComposerTyping: (content: string) => void;
+    onStopTyping: () => void;
 };
 
 const getInitials = (name: string) => {
@@ -56,6 +64,8 @@ export const ChatPanel = ({
     messages,
     messagesLoading,
     messagesError,
+    historySyncError,
+    onRetryHistorySync,
     currentUserId,
     onSendMessage,
     onRetryMessage,
@@ -66,6 +76,11 @@ export const ChatPanel = ({
     isLoadingOlder,
     olderMessagesError,
     onBack,
+    isPeerTyping,
+    isPeerOnline,
+    peerLastSeenAt,
+    onComposerTyping,
+    onStopTyping,
 }: ChatPanelProps) => {
     const conversationUser = conversation?.user;
 
@@ -91,6 +106,7 @@ export const ChatPanel = ({
     // Edit
     const startEditing = (message: Message) => {
         if (submittingRef.current) return;
+        onStopTyping(); // Edit не сообщает собеседнику о наборе нового сообщения
 
         // Сохраняем незавершённый черновик, чтобы вернуть его после Save/Cancel.
         if (!editingMessage) draftRef.current = content;
@@ -179,6 +195,7 @@ export const ChatPanel = ({
                 setEditingMessage(null);
                 setContent(draftRef.current);
             } else {
+                onStopTyping();
                 onSendMessage(trimmedContent, replyingMessage ?? undefined);
                 setContent("");
                 // Текст и reply уже сохранены в optimistic bubble, включая случай ошибки POST.
@@ -207,6 +224,11 @@ export const ChatPanel = ({
         );
     }
 
+    // Пока presence неизвестен, оставляем username. Набор текста имеет приоритет над Online/Last seen.
+    let statusText = `@${conversationUser.username}`;
+    if (isPeerOnline !== null) statusText = isPeerOnline ? "Online" : formatLastSeen(peerLastSeenAt);
+    if (isPeerTyping) statusText = "печатает…";
+
     return (
         <section className="flux-chat-panel" onKeyDown={(event) => {
             // Escape сначала отменяет Reply, но меню и модалка обрабатывают его сами.
@@ -233,8 +255,10 @@ export const ChatPanel = ({
                         <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 max-lg:truncate">
-                            @{conversationUser.username}
+                        <p aria-live="polite" className={`mt-0.5 text-xs transition-colors duration-150 motion-reduce:transition-none max-lg:truncate ${
+                            isPeerTyping || isPeerOnline === true ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
+                        }`}>
+                            {statusText}
                         </p>
                     </div>
                 </div>
@@ -291,6 +315,15 @@ export const ChatPanel = ({
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
+                {historySyncError && (
+                    <div className="mb-2 flex items-center justify-between gap-3 text-xs text-rose-600 dark:text-rose-300" role="alert">
+                        <span className="min-w-0">{historySyncError}</span>
+                        <button type="button" onClick={onRetryHistorySync}
+                            className="shrink-0 cursor-pointer rounded-md px-2 py-1 font-medium transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                            Retry
+                        </button>
+                    </div>
+                )}
                 {replyingMessage && (
                     <div className="mb-2 flex items-center gap-3" aria-label="Reply preview">
                         <blockquote className="flux-reply-preview min-w-0 flex-1">
@@ -329,7 +362,12 @@ export const ChatPanel = ({
                         placeholder={`Message ${conversationUser.name}...`}
                         aria-label={editingMessage ? "Edit message" : `Message ${conversationUser.name}`}
                         value={content}
-                        onChange={(event) => setContent(event.target.value)}
+                        onChange={(event) => {
+                            const nextContent = event.target.value;
+                            setContent(nextContent);
+                            if (!editingMessage) onComposerTyping(nextContent);
+                        }}
+                        onBlur={onStopTyping}
                         readOnly={isSubmitting}
                         onKeyDown={(event) => {
                             if (event.key === "Escape" && editingMessage) {

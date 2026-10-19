@@ -7,6 +7,7 @@ import { AuthContext } from "./auth-context";
 // При первом монтировании восстанавливает сессию через refresh cookie.
 // Через Context отдаёт user, accessToken, login и authenticatedRequest;
 // последнюю используют hooks/API для защищённых запросов с retry после 401.
+// Realtime получает актуальный JWT и тот же refresh resolver через Context.
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
@@ -37,7 +38,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const refreshAccessToken = useCallback((): Promise<string | null> => {
         if (refreshPromiseRef.current) {
-            return refreshPromiseRef.current;
+            return refreshPromiseRef.current; // REST и socket ждут тот же запрос, а не запускают новый
         }
 
         const refreshPromise = refreshRequest()
@@ -64,6 +65,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return refreshPromise;
     }, [clearAuth, updateAccessToken]);
 
+    // Просто возвращаем текущий токен
+    const getAccessToken = useCallback(() => accessTokenRef.current, []);
+
+    // "сервер отклонил этот токен, дай подходящий для некст попытки"
+    const resolveAccessTokenAfter401 = useCallback(
+        (rejectedToken: string) => {
+            if (accessTokenRef.current !== rejectedToken) {
+                return Promise.resolve(accessTokenRef.current); // уже обновили JWT или очистили auth; без нового refresh
+            }
+            return refreshAccessToken(); // отклонённый JWT всё ещё текущий — нужно обновление
+        },
+        [refreshAccessToken],
+    );
+
     // единая ф-ция для всех защищенных API-запросов
     const authenticatedRequest = useCallback<AuthenticatedRequest>(
         async (input, init) => {
@@ -76,18 +91,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             // если два запроса в похожее время, то проверяем не был ли запрос отправлен со старым токеном
             // если да, то просто повторяем с текущим(который новый), иначе обновл. access token
-            const resolveAccessTokenAfter401 = () => {
-                // Поздний 401 со старым токеном использует уже обновлённый результат другого refresh.
-                if (accessTokenRef.current !== currentAccessToken) {
-                    return Promise.resolve(accessTokenRef.current);
-                }
+            // Поздний 401 со старым токеном использует уже обновлённый результат другого refresh.
+            const resolveToken = () => resolveAccessTokenAfter401(currentAccessToken);
 
-                return refreshAccessToken();
-            };
-
-            return requestWithAuth(input, init, currentAccessToken, resolveAccessTokenAfter401);
+            return requestWithAuth(input, init, currentAccessToken, resolveToken);
         },
-        [refreshAccessToken],
+        [resolveAccessTokenAfter401],
     );
 
     // восстанавливаем авторизацию после запуска / перезагрузки приложения
@@ -141,6 +150,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 loading,
                 login,
                 authenticatedRequest,
+                getAccessToken,
+                resolveAccessTokenAfter401,
             }}
         >
             {children}

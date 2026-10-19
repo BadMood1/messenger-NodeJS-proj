@@ -1,4 +1,5 @@
 import express from "express";
+import { createServer } from "node:http";
 import { prisma } from "./lib/prisma.js";
 import cors from "cors";
 import authRouter from "./routes/auth.routes.js";
@@ -7,13 +8,15 @@ import cookieParser from "cookie-parser";
 import { userRouter } from "./routes/user.routes.js";
 import { friendRouter } from "./routes/friend.routes.js";
 import { conversationRouter } from "./routes/conversation.routes.js";
+import { initializeSocketServer } from "./lib/socket.js";
 
 const app = express();
+const FRONTEND_ORIGIN = "http://localhost:5173";
 
 // Разрешаем нашему frontend отправлять запросы и cookies
 app.use(
     cors({
-        origin: "http://localhost:5173",
+        origin: FRONTEND_ORIGIN,
         credentials: true, // Разрешаем отправку cookies
     }),
 );
@@ -29,17 +32,11 @@ app.use("/api/conversations", conversationRouter);
 app.use(errorHandler);
 //
 
-app.get("/", (req, res) => {
-    res.send("Hello, World!");
-});
-
-app.get("/api/users", async (req, res) => {
-    const users = await prisma.user.findMany();
-
-    res.json(users);
-});
-
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+// REST и Socket.IO используют один HTTP-сервер и один порт.
+const httpServer = createServer(app);
+initializeSocketServer(httpServer, FRONTEND_ORIGIN);
+
+httpServer.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });

@@ -11,6 +11,7 @@ export type MessageSender = {
 export type Message = {
     id: string;
     content: string;
+    clientMessageId: string | null; // у старых сообщений null; новые связаны с frontend по этому UUID
     createdAt: string;
     updatedAt: string;
     senderId: string;
@@ -20,9 +21,12 @@ export type Message = {
     replyTo: {
         id: string;
         content: string;
+        updatedAt: string; // Дата правки цитируемого сообщения, не самого ответа.
         sender: Pick<MessageSender, "id" | "name" | "username">;
     } | null;
 };
+
+export type MessageDeletedEvent = Pick<Message, "id" | "conversationId">;
 
 type MessagesResponse = {
     messages: Message[];
@@ -108,13 +112,14 @@ export const sendMessage = async (
     content: string,
     authenticatedRequest: AuthenticatedRequest,
     replyToId?: string,
+    clientMessageId?: string,
 ) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content, replyToId }),
+        body: JSON.stringify({ content, replyToId, clientMessageId }),
     });
 
     if (!response.ok) {
@@ -166,10 +171,7 @@ export const editMessage = async (
     return data.message;
 };
 
-export const deleteMessage = async (
-    messageId: string,
-    authenticatedRequest: AuthenticatedRequest,
-) => {
+export const deleteMessage = async (messageId: string, authenticatedRequest: AuthenticatedRequest) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/messages/${messageId}`, {
         method: "DELETE",
     });
