@@ -90,6 +90,12 @@ model ConversationMember {
   userId         String
   joinedAt       DateTime @default(now())
 
+  // До этого сообщения включительно участник прочитал чат.
+  // Сравниваем createdAt, а при одинаковом времени — id сообщения.
+  // Храним значения без relation: удаление сообщения не сбрасывает границу.
+  lastReadMessageId        String?
+  lastReadMessageCreatedAt DateTime?
+
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -1,7 +1,11 @@
 import { Router } from "express";
 
 import { authMiddleware } from "../middleware/auth.middleware.js";
-import { getConversations, openDirectConversation } from "../controllers/conversation.controller.js";
+import {
+    getConversations,
+    markConversationAsRead,
+    openDirectConversation,
+} from "../controllers/conversation.controller.js";
 import {
     createMessage,
     getMessageHistory,
@@ -17,6 +21,7 @@ conversationRouter.get("/:conversationId/messages", authMiddleware, getMessageHi
 conversationRouter.post("/direct/:userId", authMiddleware, openDirectConversation);
 conversationRouter.post("/:conversationId/messages", authMiddleware, createMessage);
 
+conversationRouter.patch("/:conversationId/read", authMiddleware, markConversationAsRead);
 conversationRouter.patch("/messages/:messageId", authMiddleware, updateMessage);
 
 conversationRouter.delete("/messages/:messageId", authMiddleware, removeMessage);
