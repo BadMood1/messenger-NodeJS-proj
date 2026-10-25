@@ -3,26 +3,7 @@ import { AppError } from "../errors/app-error.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../lib/socket.js";
 import { createMessageSendTiming } from "../lib/message-send-timing.js";
-
-// Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
-const messageInclude = {
-    sender: {
-        select: {
-            id: true,
-            name: true,
-            username: true,
-            image: true,
-        },
-    },
-    replyTo: {
-        select: {
-            id: true,
-            content: true,
-            updatedAt: true, // Дата оригинала позволяет frontend сравнить свежесть цитаты без загрузки самого сообщения.
-            sender: { select: { id: true, name: true, username: true } },
-        },
-    },
-} as const;
+import { messageInclude } from "../lib/message-include.js";
 
 // Получает чат, автора, текст и необязательные id для Reply и Retry.
 // Проверяет права, возвращает существующее сообщение либо сохраняет новое и рассылает message:created.
@@ -126,68 +107,6 @@ export const sendMessage = async (
     } finally {
         timing.finish();
     }
-};
-
-export const getMessages = async (conversationId: string, userId: string, cursor?: string, limit = 30) => {
-    // cursor - от какого места(сообщ.) продолжать загрузку истории
-    // Проверяем, что пользователь состоит в этом чате
-    const member = await prisma.conversationMember.findUnique({
-        where: {
-            conversationId_userId: {
-                conversationId,
-                userId,
-            },
-        },
-    });
-
-    if (!member) {
-        throw new AppError(403, "You are not a member of this conversation");
-    }
-
-    // Берём на 1 сообщение больше, чтобы понять,
-    // есть ли ещё более старые сообщения (вернуло 31 = сообщений ещё больше)
-    const messages = await prisma.message.findMany({
-        where: {
-            conversationId,
-        },
-
-        orderBy: {
-            createdAt: "desc",
-        },
-
-        take: limit + 1,
-
-        // Если cursor есть — продолжаем загрузку после него
-        ...(cursor && {
-            cursor: {
-                id: cursor,
-            },
-
-            // Сам cursor второй раз не возвращаем
-            skip: 1,
-        }),
-
-        include: messageInclude,
-    });
-
-    // Если получили больше limit — значит история ещё есть
-    const hasMore = messages.length > limit;
-
-    if (hasMore) {
-        messages.pop(); // лишнее проверочное сообщение
-    }
-
-    // Последний элемент здесь — самое старое сообщение текущей страницы
-    const nextCursor = hasMore ? (messages[messages.length - 1]?.id ?? null) : null;
-
-    // Из БД получили от новых к старым.
-    // Для чата удобнее вернуть от старых к новым.
-    messages.reverse();
-
-    return {
-        messages,
-        nextCursor,
-    };
 };
 
 export const editMessage = async (messageId: string, userId: string, content: string) => {
