@@ -43,7 +43,11 @@ export const MessengerPage = () => {
         historySyncError,
         requestHistorySync,
         isLoadingOlder,
+        isLoadingNewer,
         olderMessagesError,
+        newerMessagesError,
+        firstUnreadMessageId,
+        retryHistoryPage,
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,
@@ -210,7 +214,11 @@ export const MessengerPage = () => {
                 messagesContainerRef={messagesContainerRef}
                 onMessagesScroll={handleMessagesScroll}
                 isLoadingOlder={isLoadingOlder}
+                isLoadingNewer={isLoadingNewer}
                 olderMessagesError={olderMessagesError}
+                newerMessagesError={newerMessagesError}
+                firstUnreadMessageId={firstUnreadMessageId}
+                onRetryHistoryPage={retryHistoryPage}
                 onBack={() => setSelectedConversationId(null)}
                 isPeerTyping={isPeerTyping}
                 isPeerOnline={isPeerOnline}

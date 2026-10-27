@@ -11,7 +11,7 @@ import {
     Video,
     X,
 } from "lucide-react";
-import { useRef, useState, type FormEvent, type RefObject } from "react";
+import { Fragment, useRef, useState, type FormEvent, type RefObject } from "react";
 
 import { MessageBubble } from "./MessageBubble";
 import {
@@ -41,7 +41,11 @@ type ChatPanelProps = {
     messagesContainerRef: RefObject<HTMLDivElement | null>;
     onMessagesScroll: () => void;
     isLoadingOlder: boolean;
+    isLoadingNewer: boolean;
     olderMessagesError: string | null;
+    newerMessagesError: string | null;
+    firstUnreadMessageId: string | null;
+    onRetryHistoryPage: () => void;
     onBack: () => void;
     isPeerTyping: boolean;
     isPeerOnline: boolean | null;
@@ -74,7 +78,11 @@ export const ChatPanel = ({
     messagesContainerRef,
     onMessagesScroll,
     isLoadingOlder,
+    isLoadingNewer,
     olderMessagesError,
+    newerMessagesError,
+    firstUnreadMessageId,
+    onRetryHistoryPage,
     onBack,
     isPeerTyping,
     isPeerOnline,
@@ -297,24 +305,48 @@ export const ChatPanel = ({
                     <div className="flux-chat-content-state">No messages yet</div>
                 ) : (
                     <div className="flux-message-stack">
-                        {isLoadingOlder && <div className="flux-load-older">Loading older messages...</div>}
+                        {isLoadingOlder && <div className="flux-load-older" role="status">Loading older messages...</div>}
                         {olderMessagesError && (
                             <div className="flux-load-older-error" role="alert">
                                 {olderMessagesError}
+                                <button type="button" onClick={onRetryHistoryPage}
+                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                                    Retry
+                                </button>
                             </div>
                         )}
                         {messages.map((message) => (
-                            <MessageBubble
-                                key={message.id}
-                                message={message}
-                                isOwnMessage={message.senderId === currentUserId}
-                                actionsDisabled={isSubmitting || isDeleting}
-                                onEdit={startEditing}
-                                onDelete={confirmDelete}
-                                onReply={startReply}
-                                onRetry={onRetryMessage}
-                            />
+                            <Fragment key={message.id}>
+                                {message.id === firstUnreadMessageId && (
+                                    <div className="flux-message-day" data-unread-separator role="separator" aria-label="Unread messages">
+                                        <span>Unread messages</span>
+                                    </div>
+                                )}
+                                <MessageBubble
+                                    message={message}
+                                    isOwnMessage={message.senderId === currentUserId}
+                                    actionsDisabled={isSubmitting || isDeleting}
+                                    onEdit={startEditing}
+                                    onDelete={confirmDelete}
+                                    onReply={startReply}
+                                    onRetry={onRetryMessage}
+                                />
+                            </Fragment>
                         ))}
+                        {isLoadingNewer && (
+                            <div className="self-center py-1 text-xs text-slate-500 dark:text-slate-400" role="status">
+                                Loading newer messages...
+                            </div>
+                        )}
+                        {newerMessagesError && (
+                            <div className="self-center py-1 text-xs text-rose-600 dark:text-rose-300" role="alert">
+                                {newerMessagesError}
+                                <button type="button" onClick={onRetryHistoryPage}
+                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                                    Retry
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

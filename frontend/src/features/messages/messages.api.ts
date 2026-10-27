@@ -28,9 +28,18 @@ export type Message = {
 
 export type MessageDeletedEvent = Pick<Message, "id" | "conversationId">;
 
+// id и дата вместе задают позицию, даже если сообщение уже удалено.
+export type MessageHistoryCursor = {
+    id: string;
+    createdAt: string;
+};
+
 type MessagesResponse = {
     messages: Message[];
     nextCursor: string | null;
+    olderCursor: MessageHistoryCursor | null;
+    newerCursor: MessageHistoryCursor | null;
+    firstUnreadMessageId: string | null;
 };
 
 // Только клиентский статус: backend и cursor работают с обычными Message.
@@ -39,9 +48,8 @@ export type ClientMessage = Message & {
     sendError?: string;
 };
 
-export type MessagesPage = {
-    messages: Message[];
-    nextCursor: string | null;
+export type MessagesPage = MessagesResponse & {
+    // Пока существующие хуки используют nextCursor/hasMore для загрузки вверх.
     hasMore: boolean;
 };
 
@@ -55,15 +63,20 @@ type EditMessageResponse = {
 
 type GetMessagesOptions = {
     cursor?: string;
+    cursorCreatedAt?: string;
+    direction?: "older" | "newer";
+    mode?: "latest" | "unread";
     limit?: number;
     signal?: AbortSignal;
 };
 
-// Без cursor загружаем первую страницу, с cursor — более старые сообщения.
+// Получает id чата, функцию авторизованных запросов и параметры загрузки истории.
+// Передаёт параметры в GET; без новых опций загружает историю как раньше, signal сохраняет отмену.
+// Возвращает сообщения, курсоры в обе стороны, id первого непрочитанного и прежний hasMore.
 export const getMessages = async (
     conversationId: string,
     authenticatedRequest: AuthenticatedRequest,
-    { cursor, limit, signal }: GetMessagesOptions = {},
+    { cursor, cursorCreatedAt, direction, mode, limit, signal }: GetMessagesOptions = {},
 ): Promise<MessagesPage> => {
     // формируем query параметры в url
     const query = new URLSearchParams();
@@ -72,8 +85,20 @@ export const getMessages = async (
         query.set("cursor", cursor);
     }
 
+    if (cursorCreatedAt) {
+        query.set("cursorCreatedAt", cursorCreatedAt);
+    }
+
+    if (direction) {
+        query.set("direction", direction);
+    }
+
+    if (mode) {
+        query.set("mode", mode);
+    }
+
     if (limit) {
-        query.set("limit", String(limit)); // в бэкэнде лимит от 30 до 50
+        query.set("limit", String(limit)); // в бэкэнде от 1 до 50, по умолчанию 30
     }
 
     const queryString = query.toString();
@@ -102,7 +127,10 @@ export const getMessages = async (
     return {
         messages: data.messages,
         nextCursor: data.nextCursor,
-        // Backend возвращает nextCursor только если у истории есть следующая страница.
+        olderCursor: data.olderCursor,
+        newerCursor: data.newerCursor,
+        firstUnreadMessageId: data.firstUnreadMessageId,
+        // nextCursor по-прежнему обозначает только продолжение вверх, не вниз.
         hasMore: data.nextCursor !== null,
     };
 };

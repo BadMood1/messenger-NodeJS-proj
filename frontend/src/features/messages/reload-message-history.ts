@@ -1,30 +1,63 @@
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { getMessages, type Message, type MessagesPage } from "./messages.api";
+import { getMessages, type Message, type MessageHistoryCursor } from "./messages.api";
 
-// Функция после reconnect заново загружает сообщения выбранного чата от самых новых до даты самого старого сообщения,
+// Функция после reconnect заново загружает открытый участок от последнего загруженного сообщения до даты самого старого,
 //  которое уже было загружено в UI. Она последовательно запрашивает страницы через cursor, собирает сообщения без дублей,
-// сохраняет более свежие версии по updatedAt и сортирует результат по createdAt. Возвращает сообщения, nextCursor и hasMore
+// сохраняет более свежие версии по updatedAt и сортирует результат по createdAt/id. Возвращает сообщения и курсоры
 // для обновления state в вызывающем hook; при отмене или ошибке прерывает загрузку, не возвращая частичный результат.
+// Если конец чата уже открыт, начинает с самых новых; иначе сохраняет границу newestLoadedPosition.
 export const reloadMessageHistory = async (
     conversationId: string,
     authenticatedRequest: AuthenticatedRequest,
     oldestLoadedAt: string | undefined, // createdAt самого старого уже загруженного серверного сообщения. undefined - первая загрузка истории(первая страница)
     signal: AbortSignal,
-): Promise<MessagesPage> => {
+    newestLoadedPosition: MessageHistoryCursor | null = null,
+) => {
     const messagesById = new Map<string, Message>();
     const requestedCursors = new Set<string>();
-    let cursor: string | undefined;
+    let cursor: MessageHistoryCursor | undefined;
+    let newerCursor: MessageHistoryCursor | null = null;
 
+    // ------- КОНЕЦ ОТКРЫТОГО УЧАСТКА -------
+    // Если конец чата ещё не загружен, находим одно сообщение сразу после нашего окна.
+    // Загружаем older от него: так в сверку попадёт и последнее сообщение самого окна.
+    if (newestLoadedPosition) {
+        // При reconnect нужно проверить и последнее известное сообщение окна, например №100.
+        // older от №100 исключит само №100 из ответа — получим только №99 и более старые.
+        // Поэтому сначала ищем №101 как cursor: older от него включит №100 для проверки правок/удаления.
+        const afterWindow = await getMessages(conversationId, authenticatedRequest, {
+            cursor: newestLoadedPosition.id,
+            cursorCreatedAt: newestLoadedPosition.createdAt,
+            direction: "newer",
+            limit: 1,
+            signal,
+        });
+        signal.throwIfAborted();
+        const nextMessage = afterWindow.messages[0];
+        if (nextMessage) cursor = { id: nextMessage.id, createdAt: nextMessage.createdAt };
+        // Если после окна уже ничего нет, обычный запрос без cursor сверит конец чата.
+    }
+
+    // Перечитываем вверх, пока не проверим весь нужный участок или какие-то условия не сработают
     while (true) {
         signal.throwIfAborted(); // выброс ошибки при aborted
-        const page = await getMessages(conversationId, authenticatedRequest, { cursor, limit: 50, signal });
+        const page = await getMessages(conversationId, authenticatedRequest, {
+            cursor: cursor?.id,
+            cursorCreatedAt: cursor?.createdAt,
+            direction: "older",
+            limit: 50,
+            signal,
+        });
         signal.throwIfAborted();
 
-        // Если cursor удалили между страницами, пустой ответ не доказывает удаление всей старой истории.
-        // т.е. при удаленном cursor, getMessages вернёт пустой массив (Prisma), но это не значит что история изменилась
-        if (cursor && page.messages.length === 0) {
-            throw new Error("History changed while syncing. Please retry.");
+        // Если весь прежний участок удалили, открываем оставшийся конец чата вместо пустого окна без курсоров.
+        if (cursor && page.messages.length === 0 && messagesById.size === 0) {
+            return getMessages(conversationId, authenticatedRequest, { limit: 50, signal });
         }
+
+        // Курсор вниз берём только у первой страницы, вверх — у последней. (края сверки)
+        if (requestedCursors.size === 0) newerCursor = page.newerCursor;
+        // Передаём дату вместе с id: удалённый cursor больше не превращает живую историю в пустую.
 
         // Собираем страницы без дублей; если запись встретилась повторно — оставляем свежую версию.
         for (const message of page.messages) {
@@ -45,18 +78,22 @@ export const reloadMessageHistory = async (
         ) {
             return {
                 messages: [...messagesById.values()].sort(
-                    (first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt),
+                    (first, second) =>
+                        Date.parse(first.createdAt) - Date.parse(second.createdAt) ||
+                        first.id.localeCompare(second.id),
                 ),
                 nextCursor: page.nextCursor,
                 hasMore: page.hasMore,
+                olderCursor: page.olderCursor,
+                newerCursor,
             };
         }
 
         // Не зацикливаем запросы, если backend не продвинул cursor.
-        if (!page.nextCursor || requestedCursors.has(page.nextCursor)) {
+        if (!page.olderCursor || requestedCursors.has(page.olderCursor.id)) {
             throw new Error("Failed to advance history cursor. Please retry.");
         }
-        requestedCursors.add(page.nextCursor);
-        cursor = page.nextCursor; // грузим дальше страницы, более старое время
+        requestedCursors.add(page.olderCursor.id);
+        cursor = page.olderCursor; // грузим дальше страницы, более старое время
     }
 };
