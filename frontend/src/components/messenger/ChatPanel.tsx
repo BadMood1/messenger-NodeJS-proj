@@ -11,7 +11,7 @@ import {
     Video,
     X,
 } from "lucide-react";
-import { useRef, useState, type FormEvent, type RefObject } from "react";
+import { Fragment, useRef, useState, type FormEvent, type RefObject } from "react";
 
 import { MessageBubble } from "./MessageBubble";
 import {
@@ -33,6 +33,7 @@ type ChatPanelProps = {
     messagesError: string | null;
     historySyncError: string | null;
     onRetryHistorySync: () => void;
+    isOffline: boolean;
     currentUserId: string | null;
     onSendMessage: (content: string, replyTo?: Message) => void;
     onRetryMessage: (messageId: string) => void;
@@ -41,7 +42,11 @@ type ChatPanelProps = {
     messagesContainerRef: RefObject<HTMLDivElement | null>;
     onMessagesScroll: () => void;
     isLoadingOlder: boolean;
+    isLoadingNewer: boolean;
     olderMessagesError: string | null;
+    newerMessagesError: string | null;
+    firstUnreadMessageId: string | null;
+    onRetryHistoryPage: () => void;
     onBack: () => void;
     isPeerTyping: boolean;
     isPeerOnline: boolean | null;
@@ -66,6 +71,7 @@ export const ChatPanel = ({
     messagesError,
     historySyncError,
     onRetryHistorySync,
+    isOffline,
     currentUserId,
     onSendMessage,
     onRetryMessage,
@@ -74,7 +80,11 @@ export const ChatPanel = ({
     messagesContainerRef,
     onMessagesScroll,
     isLoadingOlder,
+    isLoadingNewer,
     olderMessagesError,
+    newerMessagesError,
+    firstUnreadMessageId,
+    onRetryHistoryPage,
     onBack,
     isPeerTyping,
     isPeerOnline,
@@ -244,18 +254,23 @@ export const ChatPanel = ({
                     <button type="button" className="flux-icon-button lg:hidden" aria-label="Back to conversations" onClick={onBack}>
                         <ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" />
                     </button>
-                    <div className="flux-chat-avatar overflow-hidden">
-                        {conversationUser.image ? (
-                            <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                            getInitials(conversationUser.name) || "?"
-                        )}
+                    <div className="relative shrink-0">
+                        <div className="flux-chat-avatar overflow-hidden">
+                            {conversationUser.image ? (
+                                <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                                getInitials(conversationUser.name) || "?"
+                            )}
+                        </div>
+                        {/* Показываем кружок только при подтверждённом online; null — статус ещё неизвестен. */}
+                        {/* Оставляем элемент в DOM, чтобы opacity плавно менялась и при появлении, и при исчезновении. */}
+                        <span className="flux-presence-dot" data-online={isPeerOnline === true} aria-hidden="true" />
                     </div>
                     <div className="max-lg:min-w-0">
                         <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p aria-live="polite" className={`mt-0.5 text-xs transition-colors duration-150 motion-reduce:transition-none max-lg:truncate ${
+                        <p aria-live="polite" className={`mt-0.5 text-xs max-lg:truncate ${
                             isPeerTyping || isPeerOnline === true ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
                         }`}>
                             {statusText}
@@ -282,40 +297,65 @@ export const ChatPanel = ({
             <div ref={messagesContainerRef} className="flux-chat-messages" onScroll={onMessagesScroll}>
                 {messagesLoading ? (
                     <div className="flux-chat-content-state" role="status">
-                        Loading messages...
+                        {isOffline ? "Waiting for a connection..." : "Loading messages..."}
                     </div>
                 ) : messagesError ? (
-                    <div className="flux-chat-content-state text-rose-600 dark:text-rose-300" role="alert">
-                        {messagesError}
+                    <div className={`flux-chat-content-state${isOffline ? "" : " text-rose-600 dark:text-rose-300"}`}
+                        role={isOffline ? "status" : "alert"}>
+                        {isOffline ? "Waiting for a connection..." : messagesError}
                     </div>
                 ) : messages.length === 0 ? (
                     <div className="flux-chat-content-state">No messages yet</div>
                 ) : (
                     <div className="flux-message-stack">
-                        {isLoadingOlder && <div className="flux-load-older">Loading older messages...</div>}
-                        {olderMessagesError && (
+                        {isLoadingOlder && <div className="flux-load-older" role="status">Loading older messages...</div>}
+                        {!isOffline && olderMessagesError && (
                             <div className="flux-load-older-error" role="alert">
                                 {olderMessagesError}
+                                <button type="button" onClick={onRetryHistoryPage}
+                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                                    Retry
+                                </button>
                             </div>
                         )}
                         {messages.map((message) => (
-                            <MessageBubble
-                                key={message.id}
-                                message={message}
-                                isOwnMessage={message.senderId === currentUserId}
-                                actionsDisabled={isSubmitting || isDeleting}
-                                onEdit={startEditing}
-                                onDelete={confirmDelete}
-                                onReply={startReply}
-                                onRetry={onRetryMessage}
-                            />
+                            <Fragment key={message.id}>
+                                {message.id === firstUnreadMessageId && (
+                                    <div className="flux-message-day" data-unread-separator role="separator" aria-label="Unread messages">
+                                        <span>Unread messages</span>
+                                    </div>
+                                )}
+                                <MessageBubble
+                                    message={message}
+                                    isOwnMessage={message.senderId === currentUserId}
+                                    actionsDisabled={isSubmitting || isDeleting}
+                                    onEdit={startEditing}
+                                    onDelete={confirmDelete}
+                                    onReply={startReply}
+                                    onRetry={onRetryMessage}
+                                />
+                            </Fragment>
                         ))}
+                        {isLoadingNewer && (
+                            <div className="self-center py-1 text-xs text-slate-500 dark:text-slate-400" role="status">
+                                Loading newer messages...
+                            </div>
+                        )}
+                        {!isOffline && newerMessagesError && (
+                            <div className="self-center py-1 text-xs text-rose-600 dark:text-rose-300" role="alert">
+                                {newerMessagesError}
+                                <button type="button" onClick={onRetryHistoryPage}
+                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
+                                    Retry
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
-                {historySyncError && (
+                {!isOffline && historySyncError && (
                     <div className="mb-2 flex items-center justify-between gap-3 text-xs text-rose-600 dark:text-rose-300" role="alert">
                         <span className="min-w-0">{historySyncError}</span>
                         <button type="button" onClick={onRetryHistorySync}

@@ -7,6 +7,7 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
     const messagesContainerRef = useRef<HTMLDivElement | null>(null); // DOM-эл списка сообщений
     // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
     const shouldScrollToBottomRef = useRef(false);
+    const scrollTargetMessageIdRef = useRef<string | null>(null);
     // Снимок перед prepend или сверкой истории: сохраняем видимое сообщение и его положение на экране.
     const prependScrollRef = useRef<{
         anchors: { element: HTMLElement; offset: number }[];
@@ -17,11 +18,22 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
     const scrollToBottomAfterUpdate = useCallback(() => {
         // Сейчас ставим флаг; прокручиваем после обновления DOM в useLayoutEffect ниже.
         shouldScrollToBottomRef.current = true;
+        scrollTargetMessageIdRef.current = null;
+    }, []);
+
+    // Получает id первого непрочитанного сообщения из начального ответа.
+    // Запоминает цель, чтобы прокрутить к ней после появления сообщений в DOM.
+    // Меняет только следующую позицию скролла; сообщения не помечает прочитанными.
+    const scrollToMessageAfterUpdate = useCallback((messageId: string) => {
+        scrollTargetMessageIdRef.current = messageId;
+        shouldScrollToBottomRef.current = false;
     }, []);
 
     const isNearBottom = useCallback(() => {
         const container = messagesContainerRef.current;
-        return Boolean(container && container.scrollHeight - container.scrollTop - container.clientHeight < 80);
+        return Boolean(
+            container && container.scrollHeight - container.scrollTop - container.clientHeight < 80,
+        );
     }, []);
 
     const isNearTop = useCallback(() => {
@@ -32,6 +44,7 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
     const resetScrollPosition = useCallback(() => {
         // Новый чат должен дождаться собственной первой страницы перед прокруткой вниз.
         shouldScrollToBottomRef.current = false;
+        scrollTargetMessageIdRef.current = null;
         // Снимок старого чата больше не нужен.
         prependScrollRef.current = null;
     }, []);
@@ -51,10 +64,10 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
             return rect.bottom > top && rect.top < bottom;
         });
         // Если видимый якорь удалили, пробуем следующие сообщения, затем предыдущие — не всю разницу высот.
-        const candidates = firstVisibleIndex < 0 ? elements : [
-            ...elements.slice(firstVisibleIndex),
-            ...elements.slice(0, firstVisibleIndex).reverse(),
-        ];
+        const candidates =
+            firstVisibleIndex < 0
+                ? elements
+                : [...elements.slice(firstVisibleIndex), ...elements.slice(0, firstVisibleIndex).reverse()];
         prependScrollRef.current = {
             anchors: candidates.map((element) => ({
                 element,
@@ -70,6 +83,29 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
         const container = messagesContainerRef.current;
 
         if (!container) {
+            return;
+        }
+
+        // ------- ПЕРВОЕ ОТКРЫТИЕ ВОЗЛЕ НЕПРОЧИТАННОГО -------
+        if (scrollTargetMessageIdRef.current) {
+            const targetId = scrollTargetMessageIdRef.current;
+            // находим элемент сообщения
+            const target = Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]")).find(
+                (element) => element.dataset.messageId === targetId,
+            );
+            const separator = container.querySelector<HTMLElement>("[data-unread-separator]");
+            const anchor = separator ?? target;
+
+            // Ставим разделитель у верхнего края, а не внизу окна.
+            // Если сообщение уже удалили, остаёмся в начале загруженного участка.
+            container.scrollTop = anchor
+                ? container.scrollTop +
+                  anchor.getBoundingClientRect().top -
+                  container.getBoundingClientRect().top -
+                  12
+                : 0;
+            scrollTargetMessageIdRef.current = null;
+            prependScrollRef.current = null;
             return;
         }
 
@@ -105,6 +141,7 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
     return {
         messagesContainerRef,
         scrollToBottomAfterUpdate,
+        scrollToMessageAfterUpdate,
         isNearBottom,
         isNearTop,
         resetScrollPosition,

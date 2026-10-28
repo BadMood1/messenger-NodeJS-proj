@@ -5,7 +5,8 @@ import {
     messageHistoryQuerySchema,
     sendMessageSchema,
 } from "../validators/message.schema.js";
-import { deleteMessage, editMessage, getMessages, sendMessage } from "../services/message.service.js";
+import { deleteMessage, editMessage, sendMessage } from "../services/message.service.js";
+import { getMessages } from "../services/message-history.service.js";
 
 export const createMessage = async (req: Request<{ conversationId: string }>, res: Response) => {
     const senderId = res.locals.userId;
@@ -23,16 +24,19 @@ export const createMessage = async (req: Request<{ conversationId: string }>, re
     });
 };
 
+// Получает id чата, query-параметры history и пользователя из авторизации.
+// Проверяет параметры и передаёт их сервису истории.
+// Возвращает сообщения, курсоры в обе стороны и id первого непрочитанного для начального окна.
 export const getMessageHistory = async (req: Request<{ conversationId: string }>, res: Response) => {
     const userId = res.locals.userId;
 
     // id чата из URL
     const conversationId = req.params.conversationId;
 
-    // cursor и limit берём из ?cursor=...&limit=...
-    const { cursor, limit } = messageHistoryQuerySchema.parse(req.query);
+    // cursor и limit берём из ?cursor=...&limit=...; режим и направление тоже проверяет schema.
+    const query = messageHistoryQuerySchema.parse(req.query);
 
-    const result = await getMessages(conversationId, userId, cursor, limit);
+    const result = await getMessages(conversationId, userId, query);
 
     return res.status(200).json(result);
 };

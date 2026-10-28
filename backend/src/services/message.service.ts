@@ -2,28 +2,12 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../lib/socket.js";
+import { createMessageSendTiming } from "../lib/message-send-timing.js";
+import { messageInclude } from "../lib/message-include.js";
 
-// Preview содержит только один уровень: replyTo исходного сообщения не загружаем.
-const messageInclude = {
-    sender: {
-        select: {
-            id: true,
-            name: true,
-            username: true,
-            image: true,
-        },
-    },
-    replyTo: {
-        select: {
-            id: true,
-            content: true,
-            updatedAt: true, // Дата оригинала позволяет frontend сравнить свежесть цитаты без загрузки самого сообщения.
-            sender: { select: { id: true, name: true, username: true } },
-        },
-    },
-} as const;
-
-// После сохр. в БД  публикует в сокетах message:created
+// Получает чат, автора, текст и необязательные id для Reply и Retry.
+// Проверяет права, возвращает существующее сообщение либо сохраняет новое и рассылает message:created.
+// Возвращает серверное сообщение с sender и reply preview; после сохранения повторно участников не запрашивает.
 export const sendMessage = async (
     conversationId: string,
     senderId: string,
@@ -31,141 +15,98 @@ export const sendMessage = async (
     replyToId?: string,
     clientMessageId?: string,
 ) => {
-    // Проверяем, что пользователь вообще состоит в этом чате
-    const member = await prisma.conversationMember.findUnique({
-        where: {
-            conversationId_userId: {
-                conversationId,
-                userId: senderId,
-            },
-        },
-    });
+    const timing = createMessageSendTiming();
 
-    if (!member) {
-        throw new AppError(403, "You are not a member of this conversation");
-    }
-
+    // Использует senderId и clientMessageId текущей отправки.
+    // Ищет ранее сохранённое сообщение вместе с данными автора и reply preview.
+    // Возвращает запись или null; проверку доступа и принадлежности чату выполняем ниже.
     const findExisting = async () => {
         if (!clientMessageId) return null;
-        const existing = await prisma.message.findUnique({
+        return prisma.message.findUnique({
             where: { senderId_clientMessageId: { senderId, clientMessageId } },
             include: messageInclude,
         });
+    };
+
+    try {
+        // ------- УЧАСТНИКИ И RETRY -------
+        // Запросы независимы: одновременно получаем участников и ищем повтор clientMessageId.
+        // Этот же список участников используем для доставки после сохранения.
+        const [members, existing] = await Promise.all([
+            prisma.conversationMember.findMany({ where: { conversationId }, select: { userId: true } }),
+            findExisting(),
+        ]);
+        timing.recordStage("checksMs");
+
+        // Проверяем, что пользователь вообще состоит в этом чате.
+        // Даже найденный Retry нельзя вернуть, пока не проверили доступ.
+        if (!members.some((member) => member.userId === senderId)) {
+            throw new AppError(403, "You are not a member of this conversation");
+        }
         // Один client id не используем для разных чатов, даже если автор состоит в обоих.
         if (existing && existing.conversationId !== conversationId) {
             throw new AppError(409, "Client message id already used in another conversation");
         }
-        return existing;
-    };
+        if (existing) return existing; // POST уже сохранился, а ответ потерялся — Retry возвращает ту же запись
 
-    const existing = await findExisting();
-    if (existing) return existing; // POST уже сохранился, а ответ потерялся — Retry возвращает ту же запись
-
-    if (replyToId) {
-        // Не позволяем цитировать сообщения из другого чата, даже зная их id.
-        const replyTo = await prisma.message.findFirst({
-            where: { id: replyToId, conversationId },
-            select: { id: true },
-        });
-        if (!replyTo) {
-            throw new AppError(400, "Reply message must belong to this conversation");
+        // ------- REPLY -------
+        if (replyToId) {
+            // Не позволяем цитировать сообщения из другого чата, даже зная их id.
+            const replyTo = await prisma.message.findFirst({
+                where: { id: replyToId, conversationId },
+                select: { id: true },
+            });
+            timing.recordStage("replyMs");
+            if (!replyTo) {
+                throw new AppError(400, "Reply message must belong to this conversation");
+            }
         }
-    }
 
-    // Создаём само сообщение
-    try {
-        // Сначала сохраняем в БД
-        const message = await prisma.message.create({
-            data: {
-                content,
-                senderId,
-                conversationId,
-                replyToId: replyToId ?? null,
-                clientMessageId: clientMessageId ?? null, // сохраняем связь с temp-сообщением
-            },
+        // ------- СОХРАНЕНИЕ И ДОСТАВКА -------
+        // Создаём само сообщение
+        try {
+            // Сначала сохраняем в БД
+            const message = await prisma.message.create({
+                data: {
+                    content,
+                    senderId,
+                    conversationId,
+                    replyToId: replyToId ?? null,
+                    clientMessageId: clientMessageId ?? null, // сохраняем связь с temp-сообщением
+                },
 
-            // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
-            include: messageInclude,
-        });
-        // После сохр. в БД публикуем в сокетах
-        await publishMessageCreated(message).catch(() => {
-            console.error("[socket] Failed to publish message:created");
-        });
-        return message;
-    } catch (error) {
-        // Два одновременных POST могли оба не найти запись; unique разрешит создать только одну.
-        if (
-            clientMessageId &&
-            error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === "P2002"
-        ) {
-            const existing = await findExisting();
-            if (existing) return existing;
+                // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
+                include: messageInclude,
+            });
+            timing.recordStage("createMs");
+
+            // После сохр. в БД публикуем в сокетах; участники уже получены в начале отправки.
+            await publishMessageCreated(message, members.map((member) => member.userId)).catch(() => {
+                console.error("[socket] Failed to publish message:created");
+            });
+            timing.recordStage("publishMs");
+            return message;
+        } catch (error) {
+            timing.recordStage("createFailedMs");
+            // Два одновременных POST могли оба не найти запись; unique разрешит создать только одну.
+            if (
+                clientMessageId &&
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === "P2002"
+            ) {
+                const existing = await findExisting();
+                timing.recordStage("retryLookupMs");
+                // Конкурентный запрос тоже мог использовать этот client id в другом чате.
+                if (existing && existing.conversationId !== conversationId) {
+                    throw new AppError(409, "Client message id already used in another conversation");
+                }
+                if (existing) return existing;
+            }
+            throw error;
         }
-        throw error;
+    } finally {
+        timing.finish();
     }
-};
-
-export const getMessages = async (conversationId: string, userId: string, cursor?: string, limit = 30) => {
-    // cursor - от какого места(сообщ.) продолжать загрузку истории
-    // Проверяем, что пользователь состоит в этом чате
-    const member = await prisma.conversationMember.findUnique({
-        where: {
-            conversationId_userId: {
-                conversationId,
-                userId,
-            },
-        },
-    });
-
-    if (!member) {
-        throw new AppError(403, "You are not a member of this conversation");
-    }
-
-    // Берём на 1 сообщение больше, чтобы понять,
-    // есть ли ещё более старые сообщения (вернуло 31 = сообщений ещё больше)
-    const messages = await prisma.message.findMany({
-        where: {
-            conversationId,
-        },
-
-        orderBy: {
-            createdAt: "desc",
-        },
-
-        take: limit + 1,
-
-        // Если cursor есть — продолжаем загрузку после него
-        ...(cursor && {
-            cursor: {
-                id: cursor,
-            },
-
-            // Сам cursor второй раз не возвращаем
-            skip: 1,
-        }),
-
-        include: messageInclude,
-    });
-
-    // Если получили больше limit — значит история ещё есть
-    const hasMore = messages.length > limit;
-
-    if (hasMore) {
-        messages.pop(); // лишнее проверочное сообщение
-    }
-
-    // Последний элемент здесь — самое старое сообщение текущей страницы
-    const nextCursor = hasMore ? (messages[messages.length - 1]?.id ?? null) : null;
-
-    // Из БД получили от новых к старым.
-    // Для чата удобнее вернуть от старых к новым.
-    messages.reverse();
-
-    return {
-        messages,
-        nextCursor,
-    };
 };
 
 export const editMessage = async (messageId: string, userId: string, content: string) => {

@@ -4,24 +4,22 @@ import { z } from "zod";
 import { prisma } from "./prisma.js";
 
 // ------- ЗАПРОС И ОТВЕТ PRESENCE -------
-const presenceRequestSchema = z.object({
-    conversationId: z.string().uuid(),
-});
+// Список собеседников определяет backend по userId из JWT, а не по данным клиента.
+const presenceRequestSchema = z.object({}).strict();
 
 type PresenceResponse =
     | {
           ok: true;
           presence: {
-              conversationId: string;
               userId: string;
               isOnline: boolean;
               lastSeenAt: string | null;
-          };
+          }[];
       }
     | { ok: false; error: string };
 
 // Получает Socket.IO-сервер и функцию чтения текущего online-статуса.
-// Создаёт функции запроса статуса собеседника и доставки изменений участникам DIRECT-диалогов.
+// Создаёт функции запроса статусов собеседников и доставки изменений участникам DIRECT-диалогов.
 // Возвращает регистрацию обработчика и функцию отправки presence:updated.
 export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string) => boolean) => {
     // Для каждого пользователя запоминаем версию последней начатой смены статуса.
@@ -96,14 +94,14 @@ export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string
 
     // ------- ЗАПРОС НАЧАЛЬНОГО СТАТУСА -------
     // Получает socket с проверенным userId из JWT.
-    // Подключает обработчик presence:get для запроса статуса собеседника по conversationId.
+    // Подключает обработчик presence:get для запроса статусов всех DIRECT-собеседников пользователя.
     // Ответ на запрос отправляет только запросившему клиенту через acknowledgement.
     const registerPresenceHandlers = (socket: Socket) => {
         const userId: string = socket.data.userId;
 
-        // Получает payload с conversationId и функцию ответа sendPresenceResponse от Socket.IO.
-        // Проверяет срок JWT и участие в DIRECT-диалоге, затем читает статус другого участника.
-        // Вызывает sendPresenceResponse с presence либо с ошибкой, не рассылая ответ остальным вкладкам.
+        // Получает пустой payload и функцию ответа sendPresenceResponse от Socket.IO.
+        // Проверяет срок JWT, находит только своих DIRECT-собеседников и читает их online-статусы.
+        // Возвращает список с isOnline и lastSeenAt только запросившей вкладке.
         const handlePresenceRequest = async (
             payload: unknown,
             sendPresenceResponse?: (response: PresenceResponse) => void, // функция отправки ответа на этот запрос
@@ -122,18 +120,17 @@ export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string
             }
 
             try {
-                // id пользователя берём из socket, а не из payload: нельзя запросить чужой диалог.
-                const conversation = await prisma.conversation.findFirst({
+                // id пользователя берём из socket, а не из payload: чужие собеседники не попадут в ответ.
+                const otherMembers = await prisma.conversationMember.findMany({
                     where: {
-                        id: parsed.data.conversationId,
-                        type: "DIRECT",
-                        members: { some: { userId } },
-                    },
-                    select: {
-                        members: {
-                            select: { userId: true, user: { select: { lastSeenAt: true } } },
+                        userId: { not: userId },
+                        conversation: {
+                            type: "DIRECT",
+                            members: { some: { userId } },
                         },
                     },
+                    select: { userId: true, user: { select: { lastSeenAt: true } } },
+                    distinct: ["userId"], // одного собеседника возвращаем один раз
                 });
 
                 // После ожидания БД повторно проверяем соединение и срок JWT.
@@ -143,21 +140,15 @@ export const createPresenceHandlers = (io: Server, isUserOnline: (userId: string
                     return;
                 }
 
-                const otherMember = conversation?.members.find((member) => member.userId !== userId);
-                if (!otherMember) {
-                    sendPresenceResponse({ ok: false, error: "Conversation not found or access denied" });
-                    return;
-                }
-
                 // ответ получает только вкладка, отправившая запрос
                 sendPresenceResponse({
                     ok: true,
-                    presence: {
-                        conversationId: parsed.data.conversationId,
+                    // список presences:
+                    presence: otherMembers.map((otherMember) => ({
                         userId: otherMember.userId,
                         isOnline: isUserOnline(otherMember.userId),
                         lastSeenAt: otherMember.user.lastSeenAt?.toISOString() ?? null,
-                    },
+                    })),
                 });
             } catch {
                 console.error("[socket] Failed to load presence");

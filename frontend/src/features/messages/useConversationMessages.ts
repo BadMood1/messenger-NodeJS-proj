@@ -13,7 +13,10 @@ import {
     type ClientMessage,
     type MessageSender,
     type MessageDeletedEvent,
+    type MessageHistoryCursor,
 } from "./messages.api";
+
+type HistoryPageDirection = "older" | "newer" | "latest";
 
 type UseConversationMessagesOptions = {
     conversationId: string | null;
@@ -49,16 +52,31 @@ export const useConversationMessages = ({
         conversationId: string;
         historyVersion: number;
     } | null>(null);
+    // контроллер сверки истории после reconnect
     const historySyncControllerRef = useRef<AbortController | null>(null);
 
-    const [nextCursor, setNextCursor] = useState<string | null>(null);
-    const [hasMore, setHasMore] = useState(false);
-    const [isLoadingOlder, setIsLoadingOlder] = useState(false);
-    const [olderMessagesError, setOlderMessagesError] = useState<string | null>(null);
+    // ------- ГРАНИЦЫ ОКНА И ЗАГРУЗКА СТРАНИЦ -------
+    // Курсоры не рисуем: используем их только для следующих запросов.
+    const historyCursorsRef = useRef<{
+        olderCursor: MessageHistoryCursor | null;
+        newerCursor: MessageHistoryCursor | null;
+    }>({ olderCursor: null, newerCursor: null });
+    // ID сообщения, перед которым рисуем Unread messages.
+    const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<string | null>(null);
+    // Что сейчас загружаем: older, newer, latest либо ничего — null.
+    const [loadingDirection, setLoadingDirection] = useState<HistoryPageDirection | null>(null);
+    const [paginationError, setPaginationError] = useState<{
+        direction: HistoryPageDirection;
+        message: string;
+    } | null>(null);
+    // Новые socket-сообщения ждут, пока догрузим промежуток до конца переписки.
+    const deferredMessagesRef = useRef(new Map<string, Message>());
+    // Намерение перейти к концу переписки после собственной отправки.
+    const latestWindowRequestedRef = useRef(false);
 
     const conversationIdRef = useRef(conversationId); // актуальный ID
-    const loadOlderControllerRef = useRef<AbortController | null>(null); // хранит контроллер для отмены запроса
-    const isLoadingOlderRef = useRef(false); // хранит состояние загрузки старых сообщений, чтобы не гонять несколько запросов одновременно
+    // контроллер запроса следующей страницы вверх/вниз
+    const paginationControllerRef = useRef<AbortController | null>(null); // отменяет страницу и не даёт запустить две одновременно
 
     // useLayoutEffect выполняется раньше обычного useEffect — сразу после того, как
     // React применил изменения в DOM, но до того, как браузер покажет кадр.
@@ -70,6 +88,9 @@ export const useConversationMessages = ({
         receivedDuringLoadRef.current = []; // события предыдущего чата больше не нужны
         deletedMessageIdsRef.current.clear();
         editedMessagesRef.current.clear();
+        historyCursorsRef.current = { olderCursor: null, newerCursor: null };
+        deferredMessagesRef.current.clear();
+        latestWindowRequestedRef.current = false;
     }, [conversationId]);
 
     useLayoutEffect(() => {
@@ -79,6 +100,7 @@ export const useConversationMessages = ({
     const {
         messagesContainerRef,
         scrollToBottomAfterUpdate,
+        scrollToMessageAfterUpdate,
         isNearBottom,
         isNearTop,
         resetScrollPosition,
@@ -105,8 +127,25 @@ export const useConversationMessages = ({
                 receivedDuringLoadRef.current.push(message);
                 return;
             }
+
+            // Проверяем, заменяет ли пришедшее сообщение уже отображаемое.
+            const isReplacingLoadedMessage = messagesRef.current.some(
+                (listedMessage) =>
+                    listedMessage.id === message.id ||
+                    Boolean(
+                        message.clientMessageId &&
+                        listedMessage.clientMessageId === message.clientMessageId &&
+                        listedMessage.senderId === message.senderId,
+                    ),
+            );
+            // newerCursor сущ. => ещё есть история. Наше сообщ. ничего не заменяет. Поэтому откладываем его
+            // т.е. сохраняем в Map, но пока не отображаем
+            if (historyCursorsRef.current.newerCursor && !isReplacingLoadedMessage) {
+                deferredMessagesRef.current.set(message.id, message);
+                return;
+            }
             // Внизу показываем новое сообщение; при чтении старых не уводим пользователя со своего места.
-            if (isNearBottom()) {
+            if (!historyCursorsRef.current.newerCursor && isNearBottom()) {
                 scrollToBottomAfterUpdate();
             }
 
@@ -137,6 +176,7 @@ export const useConversationMessages = ({
             if (!enabled || conversationId !== conversationIdRef.current) return;
             deletedMessageIdsRef.current.add(id);
             editedMessagesRef.current.delete(id);
+            deferredMessagesRef.current.delete(id);
             // Событие и ответ своего DELETE используют один путь; повторное удаление безопасно.
             setMessages((current) => applyKnownChanges(current));
         },
@@ -154,11 +194,10 @@ export const useConversationMessages = ({
         });
     }, []);
 
-    // Первая страница сообщений
+    // ------- ПЕРВОЕ ОТКРЫТИЕ: ОКНО НЕПРОЧИТАННЫХ ИЛИ КОНЕЦ ЧАТА -------
     useEffect(() => {
-        loadOlderControllerRef.current?.abort();
-        loadOlderControllerRef.current = null;
-        isLoadingOlderRef.current = false;
+        paginationControllerRef.current?.abort();
+        paginationControllerRef.current = null;
         resetScrollPosition();
 
         if (!conversationId || !enabled) {
@@ -173,29 +212,47 @@ export const useConversationMessages = ({
             setMessages([]);
             setMessagesError(null);
             setHistorySyncError(null);
-            setNextCursor(null);
-            setHasMore(false);
-            setIsLoadingOlder(false);
-            setOlderMessagesError(null);
+            historyCursorsRef.current = { olderCursor: null, newerCursor: null };
+            setFirstUnreadMessageId(null);
+            setLoadingDirection(null);
+            setPaginationError(null);
             setMessagesLoading(true);
 
             try {
                 const result = await getMessages(conversationId, authenticatedRequest, {
+                    mode: "unread", // backend дальше сам решает в зависимости от есть ли unread messages
                     signal: controller.signal,
                 });
 
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
-                    // Первую страницу показываем с самых новых сообщений внизу.
-                    scrollToBottomAfterUpdate();
-                    // GET мог не увидеть новые события: добавляем их к истории, а не теряем при замене state.
-                    const merged = receivedDuringLoadRef.current.reduce<ClientMessage[]>(
+                    // При наличии непрочитанного начинаем возле него, иначе показываем конец чата.
+                    if (result.firstUnreadMessageId) {
+                        scrollToMessageAfterUpdate(result.firstUnreadMessageId);
+                    } else {
+                        scrollToBottomAfterUpdate();
+                    }
+                    historyCursorsRef.current = {
+                        olderCursor: result.olderCursor,
+                        newerCursor: result.newerCursor,
+                    };
+                    setFirstUnreadMessageId(result.firstUnreadMessageId);
+                    const loadedIds = new Set(result.messages.map((message) => message.id));
+                    const receivedInWindow = receivedDuringLoadRef.current.filter((message) => {
+                        // если после загруж. окна есть ещё сообщ. и пришедшее сообщ-е нет в полученной странице GET
+                        if (result.newerCursor && !loadedIds.has(message.id)) {
+                            // добавляем в отложенные сообщения
+                            deferredMessagesRef.current.set(message.id, message);
+                            return false;
+                        }
+                        return true;
+                    });
+                    // Объединяем историю из GET с сообщениями, пришедшими через socket.io, пока мы ждали ответ
+                    const merged = receivedInWindow.reduce<ClientMessage[]>(
                         (current, message) => mergeMessage(current, message),
                         result.messages,
                     );
                     // учитываем удаления и записываем результат
                     setMessages(applyKnownChanges(merged));
-                    setNextCursor(result.nextCursor);
-                    setHasMore(result.hasMore);
                 }
             } catch (requestError) {
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
@@ -216,7 +273,7 @@ export const useConversationMessages = ({
 
         return () => {
             controller.abort();
-            loadOlderControllerRef.current?.abort();
+            paginationControllerRef.current?.abort();
         };
     }, [
         authenticatedRequest,
@@ -224,6 +281,7 @@ export const useConversationMessages = ({
         enabled,
         resetScrollPosition,
         scrollToBottomAfterUpdate,
+        scrollToMessageAfterUpdate,
         applyKnownChanges,
     ]);
 
@@ -244,17 +302,19 @@ export const useConversationMessages = ({
 
         const controller = new AbortController();
         historySyncControllerRef.current = controller;
-        // Старый load-older не должен дописать страницу поверх перечитанной истории.
-        loadOlderControllerRef.current?.abort();
-        loadOlderControllerRef.current = null;
-        isLoadingOlderRef.current = false;
-        setIsLoadingOlder(false);
+        // Старая страница не должна дописаться поверх перечитанной истории.
+        paginationControllerRef.current?.abort();
+        paginationControllerRef.current = null;
+        setLoadingDirection(null);
         setHistorySyncError(null);
 
         //  сообщения которые были на сервере до reload (исключ. sending/failed)
         const serverMessagesBeforeReload = messagesRef.current.filter((message) => !message.localStatus);
         const serverIdsBeforeReload = new Set(serverMessagesBeforeReload.map((message) => message.id));
-        const oldestLoadedAt = serverMessagesBeforeReload[0]?.createdAt;
+        // После Send из старой истории нужен конец чата; при обычном reconnect сохраняем открытое окно.
+        const opensLatest = latestWindowRequestedRef.current;
+        const oldestLoadedAt = opensLatest ? undefined : serverMessagesBeforeReload[0]?.createdAt;
+        const newestLoadedPosition = opensLatest ? null : historyCursorsRef.current.newerCursor;
         const isCurrent = () =>
             !controller.signal.aborted && // не отменён эффект
             conversationIdRef.current === historySyncRequest.conversationId && // нужный чат
@@ -269,38 +329,54 @@ export const useConversationMessages = ({
                     authenticatedRequest,
                     oldestLoadedAt, // грузит до самой старой даты которая уже была в UI
                     controller.signal,
+                    newestLoadedPosition,
                 );
                 if (!isCurrent()) return;
 
                 // ------- Получили историю -> обнаруживаем пропущенные удаления -------
-                const reloadedIds = new Set(result.messages.map((message) => message.id));
-                // Если загруженный id отсутствует во всём перечитанном участке — сообщение удалили пока мы были offline.
-                for (const id of serverIdsBeforeReload) {
-                    if (!reloadedIds.has(id)) {
-                        deletedMessageIdsRef.current.add(id);
-                        editedMessagesRef.current.delete(id);
+
+                // Не грузим последние => значит грузим старые(значит reconnect), можем проверить удаленные
+                // Заведомо избегаем ситуации когда с переходом к новому окну у нас старые сообщ. занесутся в удаленные
+                if (!opensLatest) {
+                    const reloadedIds = new Set(result.messages.map((message) => message.id));
+                    // Если загруженный id отсутствует во всём перечитанном участке — сообщение удалили пока мы были offline.
+                    for (const id of serverIdsBeforeReload) {
+                        if (!reloadedIds.has(id)) {
+                            deletedMessageIdsRef.current.add(id);
+                            editedMessagesRef.current.delete(id);
+                        }
                     }
                 }
 
                 // Внизу остаёмся внизу. При чтении истории сохраняем видимое сообщение перед заменой DOM.
-                if (isNearBottom()) {
+                if (opensLatest || (!newestLoadedPosition && isNearBottom())) {
                     scrollToBottomAfterUpdate();
                 } else {
                     saveScrollBeforeUpdate();
                 }
 
+                const deferredMessages = result.newerCursor ? [] : [...deferredMessagesRef.current.values()];
+                if (!result.newerCursor) deferredMessagesRef.current.clear();
                 setMessages((messagesNow) =>
                     // применяем edit, delete, если есть
                     applyKnownChanges(
                         // собрали новую историю сообщ., сохранили локальные отправки и reloaded сообщения, убрали дубли и отсортировали по времени
-                        reconcileMessageHistory(messagesNow, result.messages, serverIdsBeforeReload),
+                        reconcileMessageHistory(
+                            messagesNow,
+                            [...result.messages, ...deferredMessages],
+                            serverIdsBeforeReload,
+                        ),
                     ),
                 );
 
-                setNextCursor(result.nextCursor);
-                setHasMore(result.hasMore);
+                historyCursorsRef.current = {
+                    olderCursor: result.olderCursor,
+                    newerCursor: result.newerCursor,
+                };
+                latestWindowRequestedRef.current = false;
+                if (opensLatest) setFirstUnreadMessageId(null);
                 setMessagesError(null);
-                setOlderMessagesError(null);
+                setPaginationError(null);
             } catch (requestError) {
                 // При неудачной сверке не очищаем историю и локальные сообщения; пользователь может нажать Retry.
                 if (isCurrent()) {
@@ -330,96 +406,165 @@ export const useConversationMessages = ({
         saveScrollBeforeUpdate,
     ]);
 
-    // Вызываем из ChatPanel при скролле
-    const handleMessagesScroll = () => {
-        const currentConversationId = conversationIdRef.current;
+    // ------- ПРОДОЛЖЕНИЕ ИСТОРИИ В ОБЕ СТОРОНЫ -------
+    // Получает направление: старее, новее или последнее окно после собственной отправки.
+    // Загружает одну страницу, объединяет сообщения и обновляет только затронутую границу.
+    // Сохраняет видимое сообщение; устаревший ответ другого чата не применяет.
+    const loadHistoryPage = useCallback(
+        async (direction: HistoryPageDirection) => {
+            const currentConversationId = conversationIdRef.current;
+            if (
+                !enabled ||
+                !currentConversationId ||
+                initialLoadingRef.current ||
+                historyConversationId !== currentConversationId
+            )
+                return;
 
-        if (
-            !isNearTop() ||
-            !currentConversationId ||
-            historyConversationId !== currentConversationId ||
-            !hasMore ||
-            !nextCursor ||
-            isLoadingOlderRef.current ||
-            historySyncControllerRef.current ||
-            !enabled
-        ) {
-            return;
-        }
+            let cursor: MessageHistoryCursor | null = null;
+            if (direction === "older") cursor = historyCursorsRef.current.olderCursor;
+            if (direction === "newer") cursor = historyCursorsRef.current.newerCursor;
+            // запружаем вверх или вниз, но соотв. курсора нет - продолжать в эту сторону нечего
+            if (direction !== "latest" && !cursor) return;
+            // Защита от параллельной загрузки, при загрузке другой стр. или reconnect-сверке - ждём завершения
+            if (
+                direction !== "latest" &&
+                (paginationControllerRef.current || historySyncControllerRef.current)
+            )
+                return;
 
-        const controller = new AbortController();
-        loadOlderControllerRef.current = controller;
-        isLoadingOlderRef.current = true;
+            // если переход к концу уже запрошен и его страница ещё загружается - не запускаем повторный GET
+            if (direction === "latest" && latestWindowRequestedRef.current && paginationControllerRef.current)
+                return;
 
-        setIsLoadingOlder(true);
-        setOlderMessagesError(null);
+            // Подготавливаем переход к концу
+            if (direction === "latest") {
+                latestWindowRequestedRef.current = true; // намерение открыть конец чата
+                paginationControllerRef.current?.abort(); // отменяем выполняющуюся страницу старого участка
+                historySyncControllerRef.current?.abort(); // отменяем сверку старую
+                historySyncControllerRef.current = null;
+            }
+            const controller = new AbortController();
+            paginationControllerRef.current = controller;
+            const historyVersion = historyVersionRef.current;
+            const serverIdsBeforeRequest = new Set(
+                // берём актуальные сообщения, исключ. локальные sending/failed, берём ID
+                messagesRef.current.filter((message) => !message.localStatus).map((message) => message.id),
+            );
 
-        const loadOlderMessages = async () => {
+            // проверка актуальности ответа
+            // true, если запрос не отменили, открыт тот же чат, версия истории осталась прежней
+            const isCurrent = () =>
+                !controller.signal.aborted &&
+                conversationIdRef.current === currentConversationId &&
+                historyVersionRef.current === historyVersion;
+            setLoadingDirection(direction);
+            setPaginationError(null);
+
             try {
-                // Если cursor удалили, продолжаем от самого старого живого серверного сообщения.
-                const getCursor = () =>
-                    deletedMessageIdsRef.current.has(nextCursor)
-                        ? messages.find(
-                              (message) =>
-                                  !message.localStatus && !deletedMessageIdsRef.current.has(message.id),
-                          )?.id
-                        : nextCursor;
-                const cursor = getCursor();
-                let result = await getMessages(currentConversationId, authenticatedRequest, {
-                    cursor,
+                const result = await getMessages(currentConversationId, authenticatedRequest, {
+                    cursor: cursor?.id,
+                    cursorCreatedAt: cursor?.createdAt,
+                    direction: direction === "latest" ? undefined : direction,
                     signal: controller.signal,
                 });
-
-                // Cursor мог исчезнуть и во время запроса; один раз повторяем с актуальной границей.
-                if (
-                    cursor &&
-                    deletedMessageIdsRef.current.has(cursor) &&
-                    !controller.signal.aborted &&
-                    conversationIdRef.current === currentConversationId
-                ) {
-                    result = await getMessages(currentConversationId, authenticatedRequest, {
-                        cursor: getCursor(),
-                        signal: controller.signal,
-                    });
-                }
-
-                if (controller.signal.aborted || conversationIdRef.current !== currentConversationId) {
-                    return;
-                }
+                // проверяем, чтобы запрос не устарел за время ожидания
+                if (!isCurrent()) return;
 
                 // За время запроса пользователь мог прокрутить дальше или отправить сообщение.
                 // Поэтому снимаем текущую геометрию только сейчас, перед изменением messages.
-                saveScrollBeforeUpdate();
+                if (direction === "latest") scrollToBottomAfterUpdate();
+                else saveScrollBeforeUpdate();
 
+                // дошли ли до конца
+                const reachedLatest = direction !== "older" && !result.newerCursor;
+                // если дошли до конца, копируем накопленные отложенные сообщения из Map в массив
+                const deferredMessages = reachedLatest ? [...deferredMessagesRef.current.values()] : [];
+                if (reachedLatest) deferredMessagesRef.current.clear();
+                // обновл. messages
                 setMessages((currentMessages) => {
-                    const currentIds = new Set(currentMessages.map((message) => message.id));
-                    const olderMessages = result.messages.filter((message) => !currentIds.has(message.id));
-
-                    return applyKnownChanges([...olderMessages, ...currentMessages]);
+                    // Собранный список сообщений для отображения, пока без добавления отложенных
+                    const merged =
+                        direction === "latest"
+                            ? // заменяем старое окно
+                              reconcileMessageHistory(
+                                  currentMessages,
+                                  result.messages,
+                                  serverIdsBeforeRequest,
+                              )
+                            : // при older/newer дополняем существующий список
+                              // допустим currentMessages содержит №71-100, а result.messages содержит №101 и №102
+                              // берём #101, вызываем mergeMessage(currentMessages, #101); mergeMessage(массив71–101, сообщение102)
+                              result.messages.reduce<ClientMessage[]>(mergeMessage, currentMessages);
+                    // reduce подмешивает deferred messages в merged. Применяем все изменения
+                    return applyKnownChanges(deferredMessages.reduce<ClientMessage[]>(mergeMessage, merged));
                 });
-                setNextCursor(result.nextCursor);
-                setHasMore(result.hasMore);
+
+                // --- Обновление курсоров ---
+                if (direction !== "newer") historyCursorsRef.current.olderCursor = result.olderCursor;
+                if (direction !== "older") historyCursorsRef.current.newerCursor = result.newerCursor;
+                if (direction === "latest") {
+                    latestWindowRequestedRef.current = false;
+                    setFirstUnreadMessageId(null);
+                }
             } catch (requestError) {
-                if (!controller.signal.aborted && conversationIdRef.current === currentConversationId) {
-                    setOlderMessagesError(
-                        requestError instanceof Error
-                            ? requestError.message
-                            : "Failed to load older messages",
-                    );
+                if (isCurrent()) {
+                    setPaginationError({
+                        direction,
+                        message:
+                            requestError instanceof Error ? requestError.message : "Failed to load messages",
+                    });
+                    // убирает сохраненный снимок скролла, чтобы он не применился к след. обновлению
                     clearPrependScrollSnapshot();
                 }
             } finally {
                 // Старый запрос не должен сбрасывать loading нового запроса.
-                if (loadOlderControllerRef.current === controller) {
-                    loadOlderControllerRef.current = null;
-                    isLoadingOlderRef.current = false;
-                    setIsLoadingOlder(false);
+                if (paginationControllerRef.current === controller) {
+                    paginationControllerRef.current = null;
+                    setLoadingDirection(null);
                 }
             }
-        };
+        },
+        [
+            enabled,
+            historyConversationId,
+            authenticatedRequest,
+            applyKnownChanges,
+            scrollToBottomAfterUpdate,
+            saveScrollBeforeUpdate,
+            clearPrependScrollSnapshot,
+        ],
+    );
 
-        void loadOlderMessages();
+    // Получает scroll-событие контейнера сообщений из ChatPanel.
+    // У нужного края запрашивает страницу, если соответствующий cursor ещё существует.
+    // Ничего не запускает повторно при активном запросе или ошибке до Retry.
+    const handleMessagesScroll = () => {
+        if (paginationError) return;
+        if (isNearBottom() && historyCursorsRef.current.newerCursor) void loadHistoryPage("newer");
+        else if (isNearTop()) void loadHistoryPage("older");
     };
+
+    // Получает текущее направление неудачной загрузки из state.
+    // Повторяет тот же запрос после нажатия Retry.
+    // При успехе убирает ошибку и дополняет историю обычным путём.
+    const retryHistoryPage = () => {
+        if (paginationError) void loadHistoryPage(paginationError.direction);
+    };
+
+    // Автоматическая дозагрузка сообщений вниз, но даже если user не скроллил
+    // Новые сообщ. появились на экране? Тогда effect чекает мы всё ещё близко к низу? Если да - загружает ещё
+    // Например экран вмещает 50 сообщ, а получили только 30, handleMessagesScroll без скролла не вызовется, тут и работает эффект
+    useEffect(() => {
+        if (
+            !messagesLoading &&
+            !loadingDirection &&
+            !paginationError &&
+            isNearBottom() &&
+            historyCursorsRef.current.newerCursor
+        )
+            void loadHistoryPage("newer");
+    }, [messages, messagesLoading, loadingDirection, paginationError, isNearBottom, loadHistoryPage]);
 
     // выполняет POST и заменяет temp-сообщение на серверное, либо помечает его как failed.
     const deliverMessage = async (pending: ClientMessage) => {
@@ -502,6 +647,8 @@ export const useConversationMessages = ({
         };
         scrollToBottomAfterUpdate(); // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
         setMessages((current) => [...current, pending]); // добавляем сообщ. в конец списка, чтобы сразу показать его в UI.
+        // Если читали середину переписки, собственная отправка открывает последнее окно без пробела в истории.
+        if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
         // Ошибки POST остаются в bubble, а composer можно сразу использовать снова.
         void deliverMessage(pending); // асинхронно отправляем на сервер, не дожидаясь ответа.
     };
@@ -520,6 +667,7 @@ export const useConversationMessages = ({
         // Retry — новая попытка сейчас: переносим тот же temp вниз и сразу обновляем время.
         scrollToBottomAfterUpdate();
         setMessages((current) => [...current.filter((message) => message.id !== messageId), retried]);
+        if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
         void deliverMessage(retried);
     };
 
@@ -574,8 +722,16 @@ export const useConversationMessages = ({
         messagesError: isCurrentHistory ? messagesError : null,
         historySyncError: isCurrentHistory ? historySyncError : null,
         requestHistorySync,
-        isLoadingOlder: isCurrentHistory && isLoadingOlder,
-        olderMessagesError: isCurrentHistory ? olderMessagesError : null,
+        firstUnreadMessageId: isCurrentHistory ? firstUnreadMessageId : null,
+        isLoadingOlder: isCurrentHistory && loadingDirection === "older",
+        isLoadingNewer: isCurrentHistory && (loadingDirection === "newer" || loadingDirection === "latest"),
+        olderMessagesError:
+            isCurrentHistory && paginationError?.direction === "older" ? paginationError.message : null,
+        newerMessagesError:
+            isCurrentHistory && paginationError && paginationError.direction !== "older"
+                ? paginationError.message
+                : null,
+        retryHistoryPage,
         messagesContainerRef,
         handleMessagesScroll,
         sendMessage,

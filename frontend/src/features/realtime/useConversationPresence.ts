@@ -1,65 +1,56 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Socket } from "socket.io-client";
 
+import type { Conversation } from "../conversations/conversations.api";
+
 // Ждём ответ presence:get не больше 5 секунд. Это ожидание ответа, а не срок online-статуса.
 const PRESENCE_REQUEST_TIMEOUT_MS = 5000;
 
-type PeerPresence = {
-    conversationId: string;
+export type UserPresence = {
     userId: string;
     isOnline: boolean;
     lastSeenAt: string | null;
 };
 
-type PresenceUpdatedEvent = {
-    userId: string;
-    isOnline: boolean;
-    lastSeenAt: string | null;
-};
-
-type PresenceResponse = { ok: true; presence: PeerPresence } | { ok: false; error: string };
+type PresenceResponse = { ok: true; presence: UserPresence[] } | { ok: false; error: string };
 
 type ConversationPresenceOptions = {
     socketRef: RefObject<Socket | null>;
-    conversationId: string | null;
+    conversations: Conversation[];
     conversationUserId: string | null;
 };
 
-// Получает существующий socket, выбранный чат и id собеседника.
-// Запрашивает начальный статус и принимает online/offline вместе с lastSeenAt из socket-событий.
-// Возвращает статус собеседника и обработчики запроса, обновления и сброса.
+// Получает существующий socket, список диалогов и id выбранного собеседника.
+// Запрашивает начальные статусы и принимает online/offline вместе с lastSeenAt из socket-событий.
+// Возвращает общую Map статусов для sidebar, статус открытого собеседника и обработчики.
 export const useConversationPresence = ({
     socketRef,
-    conversationId,
+    conversations,
     conversationUserId,
 }: ConversationPresenceOptions) => {
-    // содержит актуальные id чата и собеседника
-    const selectedConversationRef = useRef({ conversationId, conversationUserId });
-    // Запрос, live-обновление и сброс меняют версию; ответ старого запроса пропускаем. (счетчик для проверки актуальности)
+    // Запрос и сброс меняют версию; ответ старого запроса пропускаем. (счетчик для проверки актуальности)
     const presenceVersionRef = useRef(0);
-    // полученный статус и сохранённое backend время последнего присутствия
-    const [peerPresence, setPeerPresence] = useState<PeerPresence | null>(null);
+    // Пока ждём начальный список, отдельно запоминаем более свежие socket-события.
+    const livePresenceRef = useRef(new Map<string, UserPresence>());
+    // Для каждого userId храним полученный статус и сохранённое backend время последнего присутствия.
+    const [presenceByUserId, setPresenceByUserId] = useState(new Map<string, UserPresence>());
+    // Новое сообщение меняет порядок списка, но не должно заново запрашивать presence.
+    const conversationIdsKey = conversations.map((conversation) => conversation.id).sort().join(",");
 
     // ------- ЗАПРОС НАЧАЛЬНОГО СТАТУСА -------
-    // Вызывается при выборе чата и успешном connect/reconnect.
-    // Отправляет presence:get по текущему conversationId и ждёт ack не больше 5 секунд.
-    // Сохраняет проверенный ответ, а при ошибке оставляет статус неизвестным.
+    // Вызывается при изменении набора диалогов и успешном connect/reconnect.
+    // Отправляет один presence:get для всех DIRECT-собеседников и ждёт ack не больше 5 секунд.
+    // Сохраняет список, не заменяя им более свежие статусы из socket-событий.
     const requestPresence = useCallback(() => {
         const socket = socketRef.current;
-        const selectedConversation = selectedConversationRef.current;
-        if (
-            !socket?.connected ||
-            !selectedConversation.conversationId ||
-            !selectedConversation.conversationUserId
-        ) {
-            return;
-        }
+        if (!socket?.connected) return;
 
         const requestVersion = ++presenceVersionRef.current;
+        livePresenceRef.current.clear();
 
         // Получает ошибку ожидания либо ответ backend на presence:get.
-        // Если сменился чат, соединение или уже пришёл новый статус — пропускает старый ответ.
-        // Иначе сохраняет presence для открытого чата; ошибка даёт неизвестный статус.
+        // Если запрос устарел или соединение сменилось — пропускает ответ.
+        // Иначе объединяет полученный список с socket-событиями, пришедшими за время ожидания.
         const handlePresenceResponse = (requestError: Error | null, response?: PresenceResponse) => {
             if (
                 requestVersion !== presenceVersionRef.current ||
@@ -69,80 +60,63 @@ export const useConversationPresence = ({
                 return;
 
             if (requestError || !response?.ok) {
-                setPeerPresence(null);
+                // Если список не загрузился, доверяем только событиям, полученным после запроса.
+                setPresenceByUserId(new Map(livePresenceRef.current));
                 return;
             }
 
-            const presence = response.presence;
-            if (
-                presence.conversationId !== selectedConversation.conversationId ||
-                presence.userId !== selectedConversation.conversationUserId
-            )
-                return;
-
-            setPeerPresence(presence);
+            const receivedPresence = new Map(response.presence.map((presence) => [presence.userId, presence]));
+            // Если во время запроса пришёл presence:updated, оставляем его вместо старого значения из ответа.
+            for (const [userId, presence] of livePresenceRef.current) receivedPresence.set(userId, presence);
+            setPresenceByUserId(receivedPresence);
         };
 
         // Запрос presence:get на backend
         // С timeout первый аргумент callback — ошибка ожидания, второй — ответ sendPresenceResponse с backend.
         socket.timeout(PRESENCE_REQUEST_TIMEOUT_MS).emit(
             "presence:get",
-            { conversationId: selectedConversation.conversationId },
+            {},
             handlePresenceResponse, // вызывается с ответом с backend
         );
     }, [socketRef]);
 
     // ------- LIVE-ОБНОВЛЕНИЯ СТАТУСА -------
     // Получает presence:updated с userId, признаком online/offline и lastSeenAt.
-    // Принимает только статус собеседника из открытого чата и отменяет применение старого ack.
-    // Обновляет состояние, из которого header получает Online, Last seen или Offline.
+    // Запоминает статус пользователя для sidebar и защищает его от старого ack.
+    // Обновляет общую Map: header и список диалогов получают одинаковые данные.
     const handlePresenceUpdated = useCallback(
-        (event: PresenceUpdatedEvent) => {
-            const selectedConversation = selectedConversationRef.current;
-            if (
-                !socketRef.current?.connected ||
-                !selectedConversation.conversationId ||
-                event.userId !== selectedConversation.conversationUserId
-            )
-                return;
+        (event: UserPresence) => {
+            if (!socketRef.current?.connected) return;
 
-            presenceVersionRef.current += 1; // защищает от запоздавшего ответа
-            setPeerPresence({
-                conversationId: selectedConversation.conversationId,
-                userId: event.userId,
-                isOnline: event.isOnline,
-                lastSeenAt: event.lastSeenAt,
+            livePresenceRef.current.set(event.userId, event);
+            setPresenceByUserId((previousPresence) => {
+                const nextPresence = new Map(previousPresence);
+                nextPresence.set(event.userId, event);
+                return nextPresence;
             });
         },
         [socketRef],
     );
 
-    // ------- СБРОС / СМЕНА ЧАТА -------
-    // Вызывается при disconnect (!) , смене чата или уходе со страницы.
+    // ------- СБРОС / ОБНОВЛЕНИЕ СПИСКА ДИАЛОГОВ -------
+    // Вызывается при disconnect (!) или уходе со страницы, но не при смене чата.
     // Делает ожидающие ответы неактуальными и очищает известный статус.
     // Header получает null: потеря нашего соединения не означает, что собеседник offline.
     const resetPresence = useCallback(() => {
         presenceVersionRef.current += 1;
-        setPeerPresence(null);
+        livePresenceRef.current.clear();
+        setPresenceByUserId(new Map());
     }, []);
 
     useEffect(() => {
-        selectedConversationRef.current = { conversationId, conversationUserId };
         requestPresence();
-        return () => {
-            resetPresence();
-            selectedConversationRef.current = { conversationId: null, conversationUserId: null };
-        };
-    }, [conversationId, conversationUserId, requestPresence, resetPresence]);
+    }, [conversationIdsKey, requestPresence]);
 
-    // До cleanup эффекта уже не показываем статус предыдущего чата.
-    // И online, и время берём только из presence выбранного собеседника.
-    const selectedPeerPresence =
-        peerPresence?.conversationId === conversationId && peerPresence?.userId === conversationUserId
-            ? peerPresence
-            : null;
+    // И online, и время берём только из записи выбранного собеседника, без отдельного состояния для header.
+    const selectedPeerPresence = conversationUserId ? presenceByUserId.get(conversationUserId) : null;
 
     return {
+        presenceByUserId,
         isPeerOnline: selectedPeerPresence?.isOnline ?? null,
         peerLastSeenAt: selectedPeerPresence?.lastSeenAt ?? null,
         requestPresence,

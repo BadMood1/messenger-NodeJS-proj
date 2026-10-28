@@ -29,7 +29,8 @@ export const mergeMessage = (
         .concat(latestMessage) // убрали дубль и соответствующий temp, добавили одно серверное сообщение
         .sort(
             (firstMessage, secondMessage) =>
-                Date.parse(firstMessage.createdAt) - Date.parse(secondMessage.createdAt),
+                Date.parse(firstMessage.createdAt) - Date.parse(secondMessage.createdAt) ||
+                firstMessage.id.localeCompare(secondMessage.id),
         ); // ставим на место по времени отправки
 };
 

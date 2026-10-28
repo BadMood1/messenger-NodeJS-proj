@@ -1,16 +1,20 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 // Здесь io — клиентская функция создания socket; на backend io — объект, созданный через new Server().
 
 import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
+import type { Conversation } from "../conversations/conversations.api";
 import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 import { useConversationTyping } from "./useConversationTyping";
 import { useConversationPresence } from "./useConversationPresence";
 
+export type RealtimeConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
+
 // Pick берёт типы двух функций из auth context; & добавляет настройки realtime-хука.
 type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessTokenAfter401"> & {
     enabled: boolean;
+    conversations: Conversation[];
     conversationId: string | null;
     conversationUserId: string | null;
     onMessageCreated: (message: Message) => void;
@@ -21,6 +25,7 @@ type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessT
 
 export const useRealtimeConnection = ({
     enabled,
+    conversations,
     conversationId,
     conversationUserId,
     getAccessToken,
@@ -32,6 +37,9 @@ export const useRealtimeConnection = ({
 }: RealtimeOptions) => {
     // Один socket для сообщений, typing и presence.
     const socketRef = useRef<Socket | null>(null);
+    const [connectionStatus, setConnectionStatus] = useState<RealtimeConnectionStatus>(
+        () => navigator.onLine ? "connecting" : "offline",
+    );
 
     // ------- TYPING НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
     const { isPeerTyping, notifyTyping, stopTyping, handleTyping, resetTyping } = useConversationTyping({
@@ -41,10 +49,10 @@ export const useRealtimeConnection = ({
     });
 
     // ------- PRESENCE НА СУЩЕСТВУЮЩЕМ СОЕДИНЕНИИ -------
-    const { isPeerOnline, peerLastSeenAt, requestPresence, handlePresenceUpdated, resetPresence } =
+    const { presenceByUserId, isPeerOnline, peerLastSeenAt, requestPresence, handlePresenceUpdated, resetPresence } =
         useConversationPresence({
             socketRef,
-            conversationId,
+            conversations,
             conversationUserId,
         });
 
@@ -57,6 +65,7 @@ export const useRealtimeConnection = ({
         let authRetried = false; // уже пробовали восстановить auth; не запускаем бесконечные retry
         let handshakeToken: string | null = null; // JWT именно последней попытки подключения
         let lastSentActivity: boolean | null = null; // не отправляем одинаковые focus/visibility-события подряд
+        let hasConnectedBefore = false;
         // Соединение принадлежит Messenger, а не выбранному чату.
 
         const socket = io(SOCKET_URL, {
@@ -72,6 +81,16 @@ export const useRealtimeConnection = ({
         });
         socketRef.current = socket; // typing и presence используют этот же socket, второго соединения нет
 
+        // Получает событие socket либо изменения доступности сети в браузере.
+        // Проверяет текущий socket и подсказку navigator.onLine.
+        // Обновляет только статус для UI; REST-запросы этот статус не блокирует.
+        const updateConnectionStatus = () => {
+            if (disposed) return;
+            if (!navigator.onLine) setConnectionStatus("offline");
+            else if (socket.connected) setConnectionStatus("connected");
+            else setConnectionStatus(hasConnectedBefore ? "reconnecting" : "connecting");
+        };
+
         // Вызывается при connect, focus, blur и смене видимости вкладки.
         // Передаёт её активность при изменении; при уходе также останавливает собственный typing.
         // Соединение оставляет открытым: сообщения продолжают приходить в фоне.
@@ -86,6 +105,8 @@ export const useRealtimeConnection = ({
         };
 
         const onConnect = () => {
+            hasConnectedBefore = true;
+            updateConnectionStatus();
             authRetried = false; // успешно подключились; будущий отказ снова можно обработать
             lastSentActivity = null; // новое соединение должно получить активность, даже если она не менялась
             reportActivity(); // фокус мог измениться, пока ждали handshake
@@ -96,13 +117,15 @@ export const useRealtimeConnection = ({
             if (import.meta.env.DEV) console.debug(`[socket] connected: ${socket.id}`);
         };
         const onDisconnect = (reason: string) => {
+            updateConnectionStatus();
             resetTyping(); // после разрыва старый typing не должен оставаться в UI
-            resetPresence(); // статус собеседника неизвестен, пока наше соединение не восстановится
+            resetPresence(); // статусы собеседников неизвестны, пока наше соединение не восстановится
             if (import.meta.env.DEV) console.debug(`[socket] disconnected: ${reason}`);
             // Сервер закрывает socket по exp JWT; такой disconnect не запускает auto-reconnect.
             if (reason === "io server disconnect" && !disposed) socket.connect();
         };
         const onConnectError = async (error: Error & { data?: { code?: string } }) => {
+            updateConnectionStatus();
             if (import.meta.env.DEV) console.debug(`[socket] connection error: ${error.message}`);
             // Один auth retry на попытку подключения; сетевые ошибки refresh не запускают.
             if (
@@ -137,11 +160,13 @@ export const useRealtimeConnection = ({
         socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
         socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
-        socket.on("presence:updated", handlePresenceUpdated); // presence hook проверит id собеседника
+        socket.on("presence:updated", handlePresenceUpdated); // общая Map обновит и sidebar, и header
 
         window.addEventListener("focus", reportActivity); // вернулся в окно
         window.addEventListener("blur", reportActivity); // окно потеряло фокус
         document.addEventListener("visibilitychange", reportActivity); // вкладка скрылась / открылась
+        window.addEventListener("online", updateConnectionStatus);
+        window.addEventListener("offline", updateConnectionStatus);
         socket.connect();
 
         return () => {
@@ -151,6 +176,8 @@ export const useRealtimeConnection = ({
             window.removeEventListener("focus", reportActivity);
             window.removeEventListener("blur", reportActivity);
             document.removeEventListener("visibilitychange", reportActivity);
+            window.removeEventListener("online", updateConnectionStatus);
+            window.removeEventListener("offline", updateConnectionStatus);
             // Cleanup закрывает и соединение, и reconnect; StrictMode не оставляет лишний socket.
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
@@ -179,5 +206,5 @@ export const useRealtimeConnection = ({
         resetPresence,
     ]); // выбранный conversation не влияет на соединение
 
-    return { isPeerTyping, notifyTyping, stopTyping, isPeerOnline, peerLastSeenAt };
+    return { isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt, connectionStatus };
 };

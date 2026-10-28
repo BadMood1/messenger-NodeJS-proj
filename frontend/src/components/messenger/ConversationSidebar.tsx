@@ -1,9 +1,11 @@
 import { MessageCircleMore, Search, UserRound, UsersRound } from "lucide-react";
 
 import type { Conversation } from "../../features/conversations/conversations.api";
+import type { UserPresence } from "../../features/realtime/useConversationPresence";
 
 type ConversationSidebarProps = {
     conversations: Conversation[];
+    presenceByUserId: ReadonlyMap<string, UserPresence>;
     loading: boolean;
     error: string | null;
     refreshError: string | null;
@@ -50,16 +52,18 @@ const formatConversationTime = (createdAt: string) => {
     }).format(date);
 };
 
-// Получает диалог, признак выбора и обработчик открытия чата.
+// Получает диалог, признаки выбора и online, а также обработчик открытия чата.
 // Отображает одного собеседника из полученной conversation.
 // Возвращает кнопку с аватаром, последним сообщением и временем.
 const ConversationRow = ({
     conversation,
     selected,
+    isOnline,
     onSelect,
 }: {
     conversation: Conversation;
     selected: boolean;
+    isOnline: boolean;
     onSelect: (id: string) => void;
 }) => {
     const displayName = conversation.user?.name || conversation.user?.username || "Unknown user";
@@ -73,7 +77,7 @@ const ConversationRow = ({
             onClick={() => onSelect(conversation.id)}
             aria-pressed={selected}
         >
-            <div className="flux-conversation-avatar">
+            <div className="flux-conversation-avatar relative">
                 {conversation.user?.image ? (
                     <img
                         src={conversation.user.image}
@@ -83,6 +87,8 @@ const ConversationRow = ({
                 ) : (
                     getInitials(displayName) || "?"
                 )}
+                <span className="flux-presence-dot" data-online={isOnline} aria-hidden="true" />
+                {isOnline && <span className="sr-only">Online</span>}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -105,6 +111,7 @@ const ConversationRow = ({
 
 export const ConversationSidebar = ({
     conversations,
+    presenceByUserId,
     loading,
     error,
     refreshError,
@@ -170,6 +177,7 @@ export const ConversationSidebar = ({
                         key={conversation.id}
                         conversation={conversation}
                         selected={conversation.id === selectedConversationId}
+                        isOnline={conversation.user ? presenceByUserId.get(conversation.user.id)?.isOnline === true : false}
                         onSelect={onSelectConversation}
                     />
                 ))

@@ -1,3 +1,5 @@
+import { ApiRequestError } from "../../lib/api-request-error";
+
 export type RefreshAccessToken = () => Promise<string | null>;
 
 export type AuthenticatedRequest = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -21,6 +23,12 @@ export const requestWithAuth = async (
         return fetch(input, {
             ...init,
             headers,
+        }).catch((error: unknown) => {
+            // Fetch не получил ответ: показываем понятный текст, сохраняя признак сетевого сбоя.
+            if (error instanceof TypeError) {
+                throw new ApiRequestError("Unable to connect to FLUX. Please try again.", null);
+            }
+            throw error;
         });
     };
 
