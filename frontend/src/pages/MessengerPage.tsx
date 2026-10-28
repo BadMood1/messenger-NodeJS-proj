@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "../components/messenger/ChatPanel";
+import { ConnectionStatus } from "../components/messenger/ConnectionStatus";
 import { ConversationSidebar } from "../components/messenger/ConversationSidebar";
 import { NavRail } from "../components/messenger/NavRail";
 import { useAuth } from "../features/auth/useAuth";
 import { useConversations } from "../features/conversations/useConversations";
+import { useConversationRead } from "../features/conversations/useConversationRead";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
+import { useLastVisibleMessage } from "../features/messages/useLastVisibleMessage";
 import type { Message, MessageDeletedEvent } from "../features/messages/messages.api";
 import { useRealtimeConnection } from "../features/realtime/useRealtimeConnection";
 
@@ -64,6 +67,24 @@ export const MessengerPage = () => {
         currentUser: user,
     });
 
+    // ------- ВИДИМОЕ СООБЩЕНИЕ ДЛЯ ГРАНИЦЫ ПРОЧТЕНИЯ -------
+    const lastVisibleMessage = useLastVisibleMessage({
+        conversationId: selectedConversation?.id ?? null,
+        messages,
+        messagesContainerRef,
+        isEnabled: isAuthenticated && !messagesLoading && !messagesError,
+    });
+
+    // ------- СОХРАНЕНИЕ ПРОЧТЕНИЯ ЧЕРЕЗ REST -------
+    const { resumeReadPositionSync } = useConversationRead({
+        conversationId: selectedConversation?.id ?? null,
+        currentUserId: user?.id ?? null,
+        lastVisibleMessage,
+        initialReadState: selectedConversation?.readState ?? null,
+        authenticatedRequest,
+        isEnabled: isAuthenticated,
+    });
+
     // ------- SOCKET-СОБЫТИЯ СООБЩЕНИЙ -------
     // Получает новое сообщение из socket.
     // Передаёт его в историю открытого чата и в список диалогов.
@@ -101,26 +122,29 @@ export const MessengerPage = () => {
     // ------- СИНХРОНИЗАЦИЯ ПОСЛЕ CONNECT / RECONNECT -------
     // Получает сигнал об успешном подключении socket.
     // Запрашивает актуальную историю открытого чата и список диалогов.
-    // Обновляет сообщения и sidebar после первого connect или reconnect.
+    // Обновляет сообщения и sidebar, возобновляет очередь прочтения после connect/reconnect.
     const onConnected = useCallback(() => {
         requestHistorySync(); // сверка истории открытого чата
         requestConversationsReload(); // обновление списка диалогов
-    }, [requestHistorySync, requestConversationsReload]);
+        resumeReadPositionSync(); // сохраняем позиции, накопленные без связи, включая закрытые чаты
+    }, [requestHistorySync, requestConversationsReload, resumeReadPositionSync]);
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     // дальше эти данные передадим в ChatPannel
-    const { isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt } = useRealtimeConnection({
-        enabled: isAuthenticated,
-        conversations,
-        conversationId: selectedConversationId,
-        conversationUserId: selectedConversation?.user?.id ?? null,
-        getAccessToken,
-        resolveAccessTokenAfter401,
-        onMessageCreated, // socket получает событие, message hook обновляет messages
-        onMessageUpdated,
-        onMessageDeleted,
-        onConnected,
-    });
+    const { connectionStatus, isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt } =
+        useRealtimeConnection({
+            enabled: isAuthenticated,
+            conversations,
+            conversationId: selectedConversationId,
+            conversationUserId: selectedConversation?.user?.id ?? null,
+            getAccessToken,
+            resolveAccessTokenAfter401,
+            onMessageCreated, // socket получает событие, message hook обновляет messages
+            onMessageUpdated,
+            onMessageDeleted,
+            onConnected,
+        });
+    const isOffline = connectionStatus === "offline";
 
     // ------- ВЫБОР ДИАЛОГА -------
     const handleSelectConversation = (conversationId: string) => {
@@ -189,9 +213,9 @@ export const MessengerPage = () => {
             <ConversationSidebar
                 conversations={conversations}
                 presenceByUserId={presenceByUserId}
-                loading={loading}
+                loading={loading || (isOffline && Boolean(error))}
                 error={error}
-                refreshError={refreshError}
+                refreshError={isOffline ? null : refreshError}
                 onRetryConversations={requestConversationsReload}
                 selectedConversationId={selectedConversationId}
                 onSelectConversation={handleSelectConversation}
@@ -206,6 +230,7 @@ export const MessengerPage = () => {
                 messagesError={messagesError}
                 historySyncError={historySyncError}
                 onRetryHistorySync={requestHistorySync}
+                isOffline={isOffline}
                 currentUserId={user?.id ?? null}
                 onSendMessage={sendMessage}
                 onRetryMessage={retryMessage}
@@ -226,6 +251,7 @@ export const MessengerPage = () => {
                 onComposerTyping={notifyTyping}
                 onStopTyping={stopTyping}
             />
+            <ConnectionStatus status={connectionStatus} />
         </main>
     );
 };

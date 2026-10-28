@@ -33,6 +33,7 @@ type ChatPanelProps = {
     messagesError: string | null;
     historySyncError: string | null;
     onRetryHistorySync: () => void;
+    isOffline: boolean;
     currentUserId: string | null;
     onSendMessage: (content: string, replyTo?: Message) => void;
     onRetryMessage: (messageId: string) => void;
@@ -70,6 +71,7 @@ export const ChatPanel = ({
     messagesError,
     historySyncError,
     onRetryHistorySync,
+    isOffline,
     currentUserId,
     onSendMessage,
     onRetryMessage,
@@ -295,18 +297,19 @@ export const ChatPanel = ({
             <div ref={messagesContainerRef} className="flux-chat-messages" onScroll={onMessagesScroll}>
                 {messagesLoading ? (
                     <div className="flux-chat-content-state" role="status">
-                        Loading messages...
+                        {isOffline ? "Waiting for a connection..." : "Loading messages..."}
                     </div>
                 ) : messagesError ? (
-                    <div className="flux-chat-content-state text-rose-600 dark:text-rose-300" role="alert">
-                        {messagesError}
+                    <div className={`flux-chat-content-state${isOffline ? "" : " text-rose-600 dark:text-rose-300"}`}
+                        role={isOffline ? "status" : "alert"}>
+                        {isOffline ? "Waiting for a connection..." : messagesError}
                     </div>
                 ) : messages.length === 0 ? (
                     <div className="flux-chat-content-state">No messages yet</div>
                 ) : (
                     <div className="flux-message-stack">
                         {isLoadingOlder && <div className="flux-load-older" role="status">Loading older messages...</div>}
-                        {olderMessagesError && (
+                        {!isOffline && olderMessagesError && (
                             <div className="flux-load-older-error" role="alert">
                                 {olderMessagesError}
                                 <button type="button" onClick={onRetryHistoryPage}
@@ -338,7 +341,7 @@ export const ChatPanel = ({
                                 Loading newer messages...
                             </div>
                         )}
-                        {newerMessagesError && (
+                        {!isOffline && newerMessagesError && (
                             <div className="self-center py-1 text-xs text-rose-600 dark:text-rose-300" role="alert">
                                 {newerMessagesError}
                                 <button type="button" onClick={onRetryHistoryPage}
@@ -352,7 +355,7 @@ export const ChatPanel = ({
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
-                {historySyncError && (
+                {!isOffline && historySyncError && (
                     <div className="mb-2 flex items-center justify-between gap-3 text-xs text-rose-600 dark:text-rose-300" role="alert">
                         <span className="min-w-0">{historySyncError}</span>
                         <button type="button" onClick={onRetryHistorySync}

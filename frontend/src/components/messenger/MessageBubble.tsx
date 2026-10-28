@@ -68,7 +68,7 @@ export const MessageBubble = ({
                     )}
                     <span className="flux-message-text">{message.content}</span>
                     <span className="flux-message-meta-spacer" aria-hidden="true" />
-                    <span className="flux-message-meta">
+                    <span className="flux-message-meta" data-read-target-message-id={message.localStatus ? undefined : message.id}>
                         <time>{formatMessageTime(message.createdAt)}</time>
                         {isOwnMessage &&
                             (message.localStatus ? (
