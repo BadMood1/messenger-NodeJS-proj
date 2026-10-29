@@ -156,6 +156,13 @@ export const getDirectConversations = async (userId: string) => {
                 lastReadMessageId: readSummary.lastReadMessageId,
                 lastReadMessageCreatedAt: readSummary.lastReadMessageCreatedAt,
             },
+            // Граница собеседника нужна для галочек после первой загрузки и reconnect.
+            peerReadState: otherMember ? {
+                conversationId: conversation.id,
+                userId: otherMember.userId,
+                lastReadMessageId: otherMember.lastReadMessageId,
+                lastReadMessageCreatedAt: otherMember.lastReadMessageCreatedAt,
+            } : null,
             unreadCount: readSummary.unreadCount,
             firstUnreadMessageId: readSummary.firstUnreadMessageId,
         };

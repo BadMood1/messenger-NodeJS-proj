@@ -1,6 +1,8 @@
 import { AppError } from "../errors/app-error.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
+import { publishConversationRead } from "../lib/socket.js";
+import { getConversationReadResult } from "./conversation-read-result.js";
 
 type ConversationReadState = {
     conversationId: string;
@@ -145,7 +147,7 @@ export const getConversationReadSummaries = async (
 // ------- СОХРАНЕНИЕ ПРОЧТЕНИЯ -------
 // Получает id чата, авторизованного пользователя и последнего прочитанного сообщения.
 // Проверяет участника и сообщение, затем сдвигает сохранённую границу только вперёд.
-// Возвращает границу этого пользователя, в том числе если более новый запрос уже опередил текущий.
+// Возвращает подтверждённую границу, счётчик и последнее сообщение для PATCH и socket.
 export const markConversationRead = async (conversationId: string, userId: string, messageId: string) => {
     // ------- ПРОВЕРКА УЧАСТНИКА И СООБЩЕНИЯ -------
     // Проверки независимы: одновременно читаем участника и сообщение, без изменения данных.
@@ -203,5 +205,14 @@ export const markConversationRead = async (conversationId: string, userId: strin
     // Если после пропущенного UPDATE участник уже отсутствует, возвращаем ошибку доступа.
     if (!readState) throw new AppError(403, "You are not a member of this conversation");
 
-    return readState;
+    const readResult = await getConversationReadResult(readState);
+    // Если граница сдвинулась, обновляем счётчики во всех вкладках этого пользователя.
+    // Сбой уведомления не отменяет уже сохранённое прочтение.
+    if (updatedMembers.length > 0) {
+        await publishConversationRead(readResult).catch(() => {
+            console.error("[socket] Failed to publish conversation:read");
+        });
+    }
+
+    return readResult;
 };

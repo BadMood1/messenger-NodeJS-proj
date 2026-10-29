@@ -25,6 +25,7 @@ import {
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { Message, ClientMessage } from "../../features/messages/messages.api";
 import { formatLastSeen } from "../../features/realtime/format-last-seen";
+import { isMessageReadByPeer } from "../../features/conversations/conversation-read-receipts";
 
 type ChatPanelProps = {
     conversation: Conversation | null;
@@ -328,6 +329,7 @@ export const ChatPanel = ({
                                 <MessageBubble
                                     message={message}
                                     isOwnMessage={message.senderId === currentUserId}
+                                    isRead={isMessageReadByPeer(message, conversation.peerReadState)}
                                     actionsDisabled={isSubmitting || isDeleting}
                                     onEdit={startEditing}
                                     onDelete={confirmDelete}

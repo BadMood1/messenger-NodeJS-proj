@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "../components/messenger/ChatPanel";
 import { ConnectionStatus } from "../components/messenger/ConnectionStatus";
@@ -27,6 +27,9 @@ export const MessengerPage = () => {
         error,
         refreshError,
         requestConversationsReload,
+        handleConversationRead,
+        handleLocalConversationRead,
+        handleConversationReadReceipt,
         handleConversationMessage,
         handleConversationMessageDeleted,
     } = useConversations({
@@ -41,6 +44,7 @@ export const MessengerPage = () => {
     // Данные сообщений из хука
     const {
         messages,
+        isLatestHistoryLoaded,
         messagesLoading,
         messagesError,
         historySyncError,
@@ -75,6 +79,11 @@ export const MessengerPage = () => {
         isEnabled: isAuthenticated && !messagesLoading && !messagesError,
     });
 
+    // Увиденную позицию показываем прочитанной до следующей отрисовки; сервер сохраняет её отдельно.
+    useLayoutEffect(() => {
+        handleLocalConversationRead(lastVisibleMessage, messages, isLatestHistoryLoaded);
+    }, [lastVisibleMessage, messages, isLatestHistoryLoaded, handleLocalConversationRead]);
+
     // ------- СОХРАНЕНИЕ ПРОЧТЕНИЯ ЧЕРЕЗ REST -------
     const { resumeReadPositionSync } = useConversationRead({
         conversationId: selectedConversation?.id ?? null,
@@ -82,6 +91,7 @@ export const MessengerPage = () => {
         lastVisibleMessage,
         initialReadState: selectedConversation?.readState ?? null,
         authenticatedRequest,
+        onReadPositionSaved: handleConversationRead,
         isEnabled: isAuthenticated,
     });
 
@@ -92,7 +102,7 @@ export const MessengerPage = () => {
     const onMessageCreated = useCallback(
         (message: Message) => {
             handleMessageCreated(message); // обновл. историю
-            handleConversationMessage(message); // обновл. sidebar
+            handleConversationMessage(message, "created"); // одновременно обновл. preview и счётчик sidebar
         },
         [handleMessageCreated, handleConversationMessage],
     );
@@ -103,7 +113,7 @@ export const MessengerPage = () => {
     const onMessageUpdated = useCallback(
         (message: Message) => {
             handleMessageUpdated(message);
-            handleConversationMessage(message);
+            handleConversationMessage(message, "updated");
         },
         [handleMessageUpdated, handleConversationMessage],
     );
@@ -142,6 +152,8 @@ export const MessengerPage = () => {
             onMessageCreated, // socket получает событие, message hook обновляет messages
             onMessageUpdated,
             onMessageDeleted,
+            onConversationRead: handleConversationRead,
+            onConversationReadReceipt: handleConversationReadReceipt,
             onConnected,
         });
     const isOffline = connectionStatus === "offline";

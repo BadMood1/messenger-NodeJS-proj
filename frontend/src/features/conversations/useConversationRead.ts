@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { ApiRequestError, isTemporaryRequestError } from "../../lib/api-request-error";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
-import { markConversationRead, type ConversationReadState } from "./conversations.api";
+import { markConversationRead, type ConversationReadState, type ConversationReadResult } from "./conversations.api";
 
 // ------- КАК СОХРАНЯЕТСЯ ПРОЧТЕНИЕ -------
 // 1. useLastVisibleMessage определяет видимую позицию; MessengerPage передаёт её в этот хук.
@@ -16,6 +16,7 @@ import { markConversationRead, type ConversationReadState } from "./conversation
 // 5. markConversationRead получает conversationId и positionToSend.messageId;
 //    через authenticatedRequest отправляет PATCH /conversations/:conversationId/read.
 // 6. Backend возвращает readState -> сохраняем его в confirmedPosition и убираем покрытую позицию.
+//    onReadPositionSaved передаёт готовый результат для обновления sidebar без GET.
 //    В finally снова вызываем scheduleRead: если накопилась новая позиция, сохраняем и её.
 // Сетевой сбой или временный HTTP-отказ -> повтор через 2/4/8/16/30 с, без ошибки возле composer.
 // Offline приостанавливает отправку; online/reconnect возобновляет её. Смена чата очередь не очищает.
@@ -40,6 +41,7 @@ type UseConversationReadOptions = {
     lastVisibleMessage: VisibleMessagePosition | null;
     initialReadState: ConversationReadState | null;
     authenticatedRequest: AuthenticatedRequest;
+    onReadPositionSaved: (result: ConversationReadResult) => void;
     isEnabled: boolean;
 };
 
@@ -232,7 +234,7 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
 
             try {
                 // получаем сохр. backend границу
-                const readState = await markConversationRead(
+                const readResult = await markConversationRead(
                     queuedConversationId,
                     positionToSend.messageId,
                     authenticatedRequest,
@@ -242,9 +244,11 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
 
                 // Сохр. в Map
                 // Backend мог вернуть более новую границу от другой вкладки — используем его ответ, не отправленный id.
-                rememberConfirmedReadPosition(readState);
+                rememberConfirmedReadPosition(readResult.readState);
                 progress.retryAttempt = 0;
                 progress.requestAllowedAt = Date.now(); // ожидания для этого чата нет, можно отправлять markConversationRead
+                // PATCH уже сохранён: обновляем счётчик, даже если socket сейчас отключён.
+                contextRef.current.onReadPositionSaved(readResult);
             } catch (error) {
                 // различаем обычную отмену и зависание
                 const didRequestTimeOut =

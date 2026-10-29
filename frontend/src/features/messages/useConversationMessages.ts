@@ -718,6 +718,7 @@ export const useConversationMessages = ({
 
     return {
         messages: isCurrentHistory ? messages : [],
+        isLatestHistoryLoaded: isCurrentHistory && !messagesLoading && !historyCursorsRef.current.newerCursor,
         messagesLoading: Boolean(conversationId && enabled) && (!isCurrentHistory || messagesLoading),
         messagesError: isCurrentHistory ? messagesError : null,
         historySyncError: isCurrentHistory ? historySyncError : null,

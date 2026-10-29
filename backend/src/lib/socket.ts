@@ -6,6 +6,7 @@ import type { Message } from "../generated/prisma/client.js";
 import { createPresenceTracker } from "./socket-presence.js";
 import { createPresenceHandlers } from "./socket-presence-events.js";
 import { createTypingHandlers } from "./socket-typing.js";
+import type { ConversationReadResult } from "../services/conversation-read-result.js";
 
 let socketServer: Server | null = null; // REST-сервис использует тот же io, который создаём при запуске
 
@@ -119,4 +120,15 @@ export const publishMessageDeleted = async ({
     const rooms = await getConversationRooms(conversationId);
     // Текст уже удалён; вкладкам участников достаточно знать id сообщения и его чата.
     if (rooms.length) socketServer.to(rooms).emit("message:deleted", { id, conversationId });
+};
+
+// Получает готовый результат сохранения прочтения: границу, счётчик и последнее сообщение.
+// Своим вкладкам отправляет результат; остальным участникам — только подтверждённую границу.
+// Обновляет счётчики владельца и галочки собеседников, не раскрывая им личный unreadCount.
+export const publishConversationRead = async (readResult: ConversationReadResult) => {
+    if (!socketServer) return;
+    const ownRoom = `user:${readResult.readState.userId}`;
+    socketServer.to(ownRoom).emit("conversation:read", readResult);
+    const peerRooms = (await getConversationRooms(readResult.readState.conversationId)).filter((room) => room !== ownRoom);
+    if (peerRooms.length) socketServer.to(peerRooms).emit("conversation:read-receipt", readResult.readState);
 };

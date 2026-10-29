@@ -24,7 +24,10 @@ export type Conversation = {
     updatedAt: string;
     user: ConversationUser | null;
     lastMessage: ConversationLastMessage | null;
-    readState: ConversationReadState;
+    readState: ConversationReadState; // до какого сообщ. backend подтвердил прочтение
+    peerReadState: ConversationReadState | null; // прочтение собеседника
+    unreadCount: number;
+    localRead?: LocalConversationRead; // до какого сообщ. я дошёл на экране
 };
 
 export type ConversationReadState = {
@@ -34,12 +37,21 @@ export type ConversationReadState = {
     lastReadMessageCreatedAt: string | null;
 };
 
+// Только клиентские данные: увиденная граница и известное окно истории до подтверждения PATCH.
+export type LocalConversationRead = {
+    readState: ConversationReadState;
+    messages: Array<Pick<ConversationLastMessage, "id" | "createdAt" | "senderId"> & { isDeleted?: boolean }>;
+    latestLoadedMessage: ConversationLastMessage | null;
+};
+
 type ConversationsResponse = {
     conversations: Conversation[];
 };
 
-type MarkConversationReadResponse = {
+export type ConversationReadResult = {
     readState: ConversationReadState;
+    unreadCount: number;
+    lastMessage: ConversationLastMessage | null;
 };
 
 type GetConversationsOptions = {
@@ -82,13 +94,13 @@ export const getConversations = async (
 
 // Получает id чата, id последнего прочитанного сообщения и функцию авторизованных запросов.
 // Отправляет PATCH с messageId; signal позволяет отменить запрос.
-// Возвращает сохранённую backend границу прочтения или выбрасывает ошибку запроса.
+// Возвращает границу, счётчик и последнее сообщение для прямого обновления sidebar.
 export const markConversationRead = async (
     conversationId: string,
     messageId: string,
     authenticatedRequest: AuthenticatedRequest,
     { signal }: MarkConversationReadOptions = {},
-): Promise<ConversationReadState> => {
+): Promise<ConversationReadResult> => {
     const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/read`, {
         method: "PATCH",
         headers: {
@@ -111,7 +123,7 @@ export const markConversationRead = async (
         throw new ApiRequestError(message, response.status);
     }
 
-    const data = (await response.json()) as MarkConversationReadResponse;
+    const data = (await response.json()) as ConversationReadResult;
 
-    return data.readState;
+    return data;
 };

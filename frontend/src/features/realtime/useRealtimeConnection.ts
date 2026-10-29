@@ -4,7 +4,7 @@ import { io, type Socket } from "socket.io-client";
 
 import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
-import type { Conversation } from "../conversations/conversations.api";
+import type { Conversation, ConversationReadResult, ConversationReadState } from "../conversations/conversations.api";
 import type { Message, MessageDeletedEvent } from "../messages/messages.api";
 import { useConversationTyping } from "./useConversationTyping";
 import { useConversationPresence } from "./useConversationPresence";
@@ -20,6 +20,8 @@ type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessT
     onMessageCreated: (message: Message) => void;
     onMessageUpdated: (message: Message) => void;
     onMessageDeleted: (message: MessageDeletedEvent) => void;
+    onConversationRead: (result: ConversationReadResult) => void;
+    onConversationReadReceipt: (readState: ConversationReadState) => void;
     onConnected: () => void;
 };
 
@@ -33,6 +35,8 @@ export const useRealtimeConnection = ({
     onMessageCreated,
     onMessageUpdated,
     onMessageDeleted,
+    onConversationRead,
+    onConversationReadReceipt,
     onConnected,
 }: RealtimeOptions) => {
     // Один socket для сообщений, typing и presence.
@@ -158,7 +162,10 @@ export const useRealtimeConnection = ({
         socket.on("connect_error", onConnectError); // попытка подключения не удалась
         socket.on("message:created", onMessageCreated); // передаём сообщение в message hook, state остаётся там
         socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
-        socket.on("message:deleted", onMessageDeleted); // передаём id в тот же hook; новый GET не нужен
+        socket.on("message:deleted", onMessageDeleted); // историю меняем локально; sidebar обновляет счётчик через GET
+        // Прочтение в любой нашей вкладке: применяем готовую границу и счётчик без GET.
+        socket.on("conversation:read", onConversationRead);
+        socket.on("conversation:read-receipt", onConversationReadReceipt); // подтверждение собеседника для галочек
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
         socket.on("presence:updated", handlePresenceUpdated); // общая Map обновит и sidebar, и header
 
@@ -185,6 +192,8 @@ export const useRealtimeConnection = ({
             socket.off("message:created", onMessageCreated);
             socket.off("message:updated", onMessageUpdated);
             socket.off("message:deleted", onMessageDeleted);
+            socket.off("conversation:read", onConversationRead);
+            socket.off("conversation:read-receipt", onConversationReadReceipt);
             socket.off("conversation:typing", handleTyping);
             socket.off("presence:updated", handlePresenceUpdated);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
@@ -197,6 +206,8 @@ export const useRealtimeConnection = ({
         onMessageCreated,
         onMessageUpdated,
         onMessageDeleted,
+        onConversationRead,
+        onConversationReadReceipt,
         onConnected,
         handleTyping,
         resetTyping,

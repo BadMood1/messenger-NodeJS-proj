@@ -1,4 +1,5 @@
 import { MessageCircleMore, Search, UserRound, UsersRound } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { UserPresence } from "../../features/realtime/useConversationPresence";
@@ -54,7 +55,7 @@ const formatConversationTime = (createdAt: string) => {
 
 // Получает диалог, признаки выбора и online, а также обработчик открытия чата.
 // Отображает одного собеседника из полученной conversation.
-// Возвращает кнопку с аватаром, последним сообщением и временем.
+// Возвращает кнопку с аватаром, последним сообщением, временем и счётчиком непрочитанных.
 const ConversationRow = ({
     conversation,
     selected,
@@ -69,6 +70,20 @@ const ConversationRow = ({
     const displayName = conversation.user?.name || conversation.user?.username || "Unknown user";
     const preview = conversation.lastMessage?.content ?? "No messages yet";
     const activityAt = conversation.lastMessage?.createdAt ?? conversation.createdAt;
+    const unreadCount = conversation.unreadCount;
+    const hasUnreadMessages = unreadCount > 0;
+    const [lastPositiveUnreadCount, setLastPositiveUnreadCount] = useState(unreadCount);
+    const displayedUnreadCount = hasUnreadMessages ? unreadCount : lastPositiveUnreadCount;
+
+    // Положительное число показываем прямо из conversation в том же рендере, что и preview.
+    // Последнее ненулевое число запоминаем только для анимации исчезновения при нуле.
+    useEffect(() => {
+        if (unreadCount <= 0) return;
+        const timerId = window.setTimeout(() => {
+            setLastPositiveUnreadCount(unreadCount);
+        }, 0);
+        return () => window.clearTimeout(timerId);
+    }, [unreadCount]);
 
     return (
         <button
@@ -101,9 +116,20 @@ const ConversationRow = ({
                     </time>
                 </div>
 
-                <p className="mt-0.5 truncate text-[13px] leading-4 text-slate-500 dark:text-slate-400">
-                    {preview}
-                </p>
+                <div className="mt-0.5 flex items-center">
+                    <p className="min-w-0 flex-1 truncate text-[13px] leading-4 text-slate-500 dark:text-slate-400">
+                        {preview}
+                    </p>
+                    <span className="flux-conversation-unread-slot" data-visible={hasUnreadMessages}
+                        aria-hidden={!hasUnreadMessages}>
+                        <span className="min-w-0 overflow-hidden">
+                            <span className="flux-conversation-unread">
+                                <span aria-hidden="true">{displayedUnreadCount > 99 ? "99+" : displayedUnreadCount}</span>
+                                <span className="sr-only">{displayedUnreadCount} unread messages</span>
+                            </span>
+                        </span>
+                    </span>
+                </div>
             </div>
         </button>
     );
