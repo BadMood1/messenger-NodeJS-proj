@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
+import { requestWithRetry, type RequestRetryState } from "../../lib/request-retry";
 import type { ClientMessage, Message, MessageDeletedEvent } from "../messages/messages.api";
 import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
 import {
@@ -43,6 +44,10 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
     const [error, setError] = useState<string | null>(null);
     const [refreshError, setRefreshError] = useState<string | null>(null); // ошибка при повторной загрузке, когда список уже есть
     const [reloadVersion, setReloadVersion] = useState(0); // state счетчик GET'ов
+    const [requestRetry, setRequestRetry] = useState<RequestRetryState | null>(null);
+    const retryStateRef = useRef<RequestRetryState | null>(null);
+    // блокируем автоматич. запуск новых серий загрузок
+    const isAutomaticReloadBlockedRef = useRef(false);
     const conversationsRef = useRef<Conversation[]>([]); // актуальный список для обработчиков событий
     const controllerRef = useRef<AbortController | null>(null); // контроллер текущего GET
     const hasLoadedRef = useRef(false); // Была ли хотя бы одна успешная загрузка
@@ -64,13 +69,26 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
     // Запускает GET, а если GET уже идёт — ставит одну загрузку в очередь.
     // Обновляет список через effect(ниже) без параллельных запросов.
     const requestConversationsReload = useCallback(() => {
-        if (!enabled) return;
+        if (!enabled || isAutomaticReloadBlockedRef.current) return;
         if (controllerRef.current) {
+            // Ручной Retry/reconnect ускоряет уже ожидающий повтор вместо второго GET.
+            if (retryStateRef.current) {
+                retryStateRef.current.retryNow();
+                return;
+            }
             reloadQueuedRef.current = true;
             return;
         }
         setReloadVersion((version) => version + 1);
     }, [enabled]);
+
+    // Получает ручной Retry или сигнал восстановления соединения.
+    // Разрешает новую серию после окончательной ошибки; события сообщений сами лимит не сбрасывают.
+    // Запускает загрузку через тот же вход, который защищает от параллельных GET.
+    const retryConversations = useCallback(() => {
+        isAutomaticReloadBlockedRef.current = false;
+        requestConversationsReload();
+    }, [requestConversationsReload]);
 
     // ------- РЕЗУЛЬТАТ СОХРАНЕНИЯ ПРОЧТЕНИЯ -------
     // Получает одинаковые данные из ответа PATCH либо события conversation:read.
@@ -150,7 +168,9 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
 
             // меняем превью диалога, если он есть, и применяем изменения к списку диалогов
             const withLocalRead = updateLocalReadFromMessage(conversationsRef.current, event);
-            updateConversationList(applyConversationMessageEvent(withLocalRead, event));
+            updateConversationList(
+                applyConversationMessageEvent(withLocalRead, event, deletedMessageIdsRef.current),
+            );
             // Если диалога не было — загружаем его через REST.
             // Если preview удалён, по оставшемуся счётчику нельзя определить, учтено ли событие.
             if (!conversation || (!conversation.lastMessage && conversation.unreadCount > 0)) {
@@ -175,8 +195,8 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
     );
 
     // ------- ОБРАБОТКА УДАЛЕНИЯ -------
-    // Получает id удалённого сообщения и id его чата.
-    // Убирает удалённый preview и запрашивает актуальный счётчик через REST.
+    // Получает результат удаления с новым preview.
+    // Сразу заменяет удалённый preview и запрашивает актуальный счётчик через REST.
     // Обновляет только список диалогов, не историю открытого чата.
     const handleConversationMessageDeleted = useCallback(
         (message: MessageDeletedEvent) => {
@@ -184,11 +204,13 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
             deletedMessageIdsRef.current.add(message.id);
             const event: ConversationMessageEvent = { type: "deleted", message };
             if (controllerRef.current) eventsDuringLoadRef.current.push(event);
-            // меняем превью диалога, если он есть, и применяем изменения к списку диалогов (удаляем)
+            // Заменяем preview и его дату одним обновлением списка, без временного lastMessage: null.
             const withLocalRead = updateLocalReadFromMessage(conversationsRef.current, event);
-            updateConversationList(applyConversationMessageEvent(withLocalRead, event));
+            updateConversationList(
+                applyConversationMessageEvent(withLocalRead, event, deletedMessageIdsRef.current),
+            );
             // Удаление даже старого сообщения может уменьшить unreadCount.
-            // Если удалён preview, тот же GET вернёт предыдущее сообщение на его место.
+            // Preview уже заменён из DELETE/socket; GET нужен для точного unreadCount.
             requestConversationsReload();
         },
         [enabled, updateConversationList, requestConversationsReload],
@@ -205,19 +227,30 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         const controller = new AbortController();
         controllerRef.current = controller;
         eventsDuringLoadRef.current = [];
+        retryStateRef.current = null;
 
         // Получает диалоги через существующий GET /conversations.
         // Добавляет к ответу события, пришедшие во время запроса.
         // Сохраняет актуальный список или ошибку загрузки.
         const loadConversations = async () => {
+            let succeeded = false;
             setLoading(!hasLoadedRef.current);
+            setRequestRetry(null);
             setError(null);
             setRefreshError(null);
 
             try {
-                const result = await getConversations(authenticatedRequest, {
-                    signal: controller.signal,
-                });
+                const result = await requestWithRetry(
+                    () => getConversations(authenticatedRequest, { signal: controller.signal }),
+                    {
+                        signal: controller.signal,
+                        onRetryState: (state) => {
+                            if (controller.signal.aborted) return;
+                            retryStateRef.current = state; // для обработчиков reload/reconnect
+                            setRequestRetry(state); // обновл. интерфейс (показываем countdown и Retry now)
+                        },
+                    },
+                );
 
                 // Для всех событий во время GET применяем их к ответу
                 if (!controller.signal.aborted) {
@@ -246,7 +279,11 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
                         // пропускаем Create/Edit, потому что сообщение уже помечено как удалённое.
                         if (event.type !== "deleted" && deletedMessageIdsRef.current.has(event.message.id))
                             continue;
-                        updatedConversations = applyConversationMessageEvent(updatedConversations, event);
+                        updatedConversations = applyConversationMessageEvent(
+                            updatedConversations,
+                            event,
+                            deletedMessageIdsRef.current,
+                        );
                     }
                     // GET может закончиться раньше PATCH: увиденное локально остаётся в UI прочитанным.
                     const hadDeletionDuringLoad = eventsDuringLoadRef.current.some(
@@ -260,10 +297,13 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
                         ),
                     );
                     hasLoadedRef.current = true;
+                    isAutomaticReloadBlockedRef.current = false; // автоматическое обновл. разрешено
+                    succeeded = true;
                 }
             } catch (requestError) {
                 // Отмена ожидаема при смене токена или уходе со страницы.
                 if (!controller.signal.aborted) {
+                    isAutomaticReloadBlockedRef.current = true;
                     const message =
                         requestError instanceof Error ? requestError.message : "Failed to load conversations";
                     // Первая загрузка показывает error state; фоновая сохраняет список и предлагает Retry.
@@ -273,13 +313,15 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
             } finally {
                 if (controllerRef.current === controller) {
                     controllerRef.current = null;
+                    retryStateRef.current = null;
                     eventsDuringLoadRef.current = [];
                     if (!controller.signal.aborted) {
                         setLoading(false);
                         // если попросили ещё одну загрузку (requestConversationsReload это делает)
                         if (reloadQueuedRef.current) {
                             reloadQueuedRef.current = false;
-                            setReloadVersion((version) => version + 1);
+                            // Исчерпание повторов не запускает новую серию из старой очереди.
+                            if (succeeded) setReloadVersion((version) => version + 1);
                         }
                     }
                 }
@@ -316,7 +358,8 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         loading: enabled && loading,
         error: enabled ? error : null,
         refreshError: enabled ? refreshError : null,
-        requestConversationsReload,
+        requestRetry: enabled ? requestRetry : null,
+        retryConversations,
         handleConversationRead,
         handleLocalConversationRead,
         handleConversationReadReceipt,

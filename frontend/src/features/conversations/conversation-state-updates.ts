@@ -106,32 +106,36 @@ export const updateConversationPreviewAndUnreadCount = (
     return sortConversationsByLastMessage(updatedConversations);
 };
 
-// ------- УДАЛЕНИЕ PREVIEW -------
-// Получает список диалогов и id удалённого сообщения с id его чата.
-// Убирает preview, если удалили именно последнее сообщение этого диалога.
-// Возвращает список без удалённого текста; предыдущее сообщение загрузит REST.
-export const clearDeletedConversationPreview = (
+// ------- ЗАМЕНА PREVIEW ПОСЛЕ УДАЛЕНИЯ -------
+// Получает список, результат удаления и известные удалённые id.
+// Заменяет удалённый preview готовым lastMessage; более новое сообщение оставляет на месте.
+// Возвращает список, отсортированный сразу по дате действующего preview.
+export const updateConversationPreviewAfterDeletion = (
     conversations: Conversation[],
-    message: MessageDeletedEvent,
+    deletion: MessageDeletedEvent,
+    deletedMessageIds: ReadonlySet<string>,
 ): Conversation[] => {
+    // Если сообщение для замены тоже уже удалено, ждём актуальный GET вместо его восстановления.
+    if (deletion.lastMessage && deletedMessageIds.has(deletion.lastMessage.id)) return conversations;
     const updatedConversations = conversations.map((conversation) =>
-        conversation.id === message.conversationId && conversation.lastMessage?.id === message.id
-            ? { ...conversation, lastMessage: null }
+        conversation.id === deletion.conversationId && conversation.lastMessage?.id === deletion.id
+            ? { ...conversation, lastMessage: deletion.lastMessage }
             : conversation,
     );
     return sortConversationsByLastMessage(updatedConversations);
 };
 
 // ------- ПРИМЕНЕНИЕ СОБЫТИЯ -------
-// Получает список диалогов и одно сохранённое событие сообщения.
+// Получает список диалогов, одно событие сообщения и известные удалённые id.
 // Применяет создание, правку или удаление к preview; создание также обновляет счётчик.
 // Возвращает обновлённый список для sidebar.
 export const applyConversationMessageEvent = (
     conversations: Conversation[],
     event: ConversationMessageEvent,
+    deletedMessageIds: ReadonlySet<string>,
 ): Conversation[] => {
     if (event.type === "deleted") {
-        return clearDeletedConversationPreview(conversations, event.message);
+        return updateConversationPreviewAfterDeletion(conversations, event.message, deletedMessageIds);
     }
     return updateConversationPreviewAndUnreadCount(conversations, event.message, event.type);
 };

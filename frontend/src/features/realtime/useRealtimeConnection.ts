@@ -162,7 +162,7 @@ export const useRealtimeConnection = ({
         socket.on("connect_error", onConnectError); // попытка подключения не удалась
         socket.on("message:created", onMessageCreated); // передаём сообщение в message hook, state остаётся там
         socket.on("message:updated", onMessageUpdated); // меняем текст и цитаты без повторного GET
-        socket.on("message:deleted", onMessageDeleted); // историю меняем локально; sidebar обновляет счётчик через GET
+        socket.on("message:deleted", onMessageDeleted); // историю и preview меняем сразу; счётчик сверяем через GET
         // Прочтение в любой нашей вкладке: применяем готовую границу и счётчик без GET.
         socket.on("conversation:read", onConversationRead);
         socket.on("conversation:read-receipt", onConversationReadReceipt); // подтверждение собеседника для галочек

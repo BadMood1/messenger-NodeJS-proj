@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import type { ClientMessage } from "./messages.api";
 
 // Только DOM и позиция скролла: сообщения и запросы остаются в useConversationMessages.
 export const useMessageScrollPosition = (messages: ClientMessage[]) => {
     const messagesContainerRef = useRef<HTMLDivElement | null>(null); // DOM-эл списка сообщений
+    const [isScrolledAwayFromBottom, setIsScrolledAwayFromBottom] = useState(false);
     // Одноразовый флаг для прокрутки вниз после initial load, не после pagination.
     const shouldScrollToBottomRef = useRef(false);
     const scrollTargetMessageIdRef = useRef<string | null>(null);
@@ -36,6 +37,25 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
         );
     }, []);
 
+    // Получает текущую геометрию контейнера через ref.
+    // Проверяет расстояние до низа при скролле и изменении размеров.
+    // Обновляет признак, по которому показываем кнопку перехода вниз.
+    const updateIsScrolledAwayFromBottom = useCallback(() => {
+        setIsScrolledAwayFromBottom(Boolean(messagesContainerRef.current && !isNearBottom()));
+    }, [isNearBottom]);
+
+    // Вызывается по клику, когда последние сообщения уже загружены.
+    // Прокручивает контейнер вниз; при reduced motion выполняет переход сразу.
+    // Меняет только позицию скролла, а прочтение определяет существующий observer.
+    const scrollToBottom = useCallback(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+        });
+    }, []);
+
     const isNearTop = useCallback(() => {
         const container = messagesContainerRef.current;
         return Boolean(container && container.scrollTop <= 80);
@@ -47,6 +67,7 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
         scrollTargetMessageIdRef.current = null;
         // Снимок старого чата больше не нужен.
         prependScrollRef.current = null;
+        setIsScrolledAwayFromBottom(false);
     }, []);
 
     const clearPrependScrollSnapshot = useCallback(() => {
@@ -138,8 +159,23 @@ export const useMessageScrollPosition = (messages: ClientMessage[]) => {
         prependScrollRef.current = null;
     }, [messages]);
 
+    // После восстановления позиции измеряем уже обновлённый DOM.
+    // ResizeObserver также учитывает клавиатуру, размер окна и изменение высоты composer.
+    useLayoutEffect(() => {
+        const container = messagesContainerRef.current;
+        updateIsScrolledAwayFromBottom();
+        if (!container) return;
+        const observer = new ResizeObserver(updateIsScrolledAwayFromBottom);
+        observer.observe(container);
+        if (container.firstElementChild) observer.observe(container.firstElementChild);
+        return () => observer.disconnect();
+    }, [messages, updateIsScrolledAwayFromBottom]);
+
     return {
         messagesContainerRef,
+        isScrolledAwayFromBottom,
+        updateIsScrolledAwayFromBottom,
+        scrollToBottom,
         scrollToBottomAfterUpdate,
         scrollToMessageAfterUpdate,
         isNearBottom,

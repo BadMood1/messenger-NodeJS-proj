@@ -112,14 +112,17 @@ export const publishMessageUpdated = async (message: Message) => {
     if (rooms.length) socketServer.to(rooms).emit("message:updated", message);
 };
 
-export const publishMessageDeleted = async ({
-    id,
-    conversationId,
-}: Pick<Message, "id" | "conversationId">) => {
+type MessageDeletedEvent = Pick<Message, "id" | "conversationId"> & {
+    lastMessage: Pick<Message, "id" | "content" | "createdAt" | "updatedAt" | "senderId"> | null;
+};
+
+// Получает id удалённого сообщения, его чат и актуальный preview после удаления.
+// Находит персональные rooms участников и отправляет им весь результат.
+// Позволяет заменить preview и его дату сразу при получении события.
+export const publishMessageDeleted = async (deletion: MessageDeletedEvent) => {
     if (!socketServer) return;
-    const rooms = await getConversationRooms(conversationId);
-    // Текст уже удалён; вкладкам участников достаточно знать id сообщения и его чата.
-    if (rooms.length) socketServer.to(rooms).emit("message:deleted", { id, conversationId });
+    const rooms = await getConversationRooms(deletion.conversationId);
+    if (rooms.length) socketServer.to(rooms).emit("message:deleted", deletion);
 };
 
 // Получает готовый результат сохранения прочтения: границу, счётчик и последнее сообщение.

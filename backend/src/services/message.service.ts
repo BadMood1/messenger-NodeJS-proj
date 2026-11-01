@@ -81,7 +81,10 @@ export const sendMessage = async (
             timing.recordStage("createMs");
 
             // После сохр. в БД публикуем в сокетах; участники уже получены в начале отправки.
-            await publishMessageCreated(message, members.map((member) => member.userId)).catch(() => {
+            await publishMessageCreated(
+                message,
+                members.map((member) => member.userId),
+            ).catch(() => {
                 console.error("[socket] Failed to publish message:created");
             });
             timing.recordStage("publishMs");
@@ -145,7 +148,9 @@ export const editMessage = async (messageId: string, userId: string, content: st
     return updatedMessage;
 };
 
-//
+// Получает id сообщения и авторизованного пользователя, проверяет автора.
+// В транзакции удаляет сообщение и получает актуальный preview.
+// Возвращает одинаковые данные для ответа DELETE и socket-события.
 export const deleteMessage = async (messageId: string, userId: string) => {
     // Ищем сообщение, чтобы проверить автора
     const message = await prisma.message.findUnique({
@@ -163,13 +168,19 @@ export const deleteMessage = async (messageId: string, userId: string) => {
         throw new AppError(403, "You cannot delete this message");
     }
 
-    await prisma.message.delete({
-        where: {
-            id: messageId,
-        },
+    const deletion = await prisma.$transaction(async (tx) => {
+        await tx.message.delete({ where: { id: messageId } });
+        // lastMessage, чтобы сформировать новое preview
+        const lastMessage = await tx.message.findFirst({
+            where: { conversationId: message.conversationId },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: { id: true, content: true, createdAt: true, updatedAt: true, senderId: true },
+        });
+        return { id: message.id, conversationId: message.conversationId, lastMessage };
     });
     // Сначала удаляем в БД, потом уведомляем. Ошибка публикации не отменяет успешный DELETE.
-    await publishMessageDeleted(message).catch(() => {
+    await publishMessageDeleted(deletion).catch(() => {
         console.error("[socket] Failed to publish message:deleted");
     });
+    return deletion;
 };

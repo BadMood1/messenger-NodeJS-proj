@@ -1,4 +1,6 @@
 import { API_URL } from "../../lib/config";
+import { createApiRequestError } from "../../lib/api-request-error";
+import { runRequestAttempt } from "../../lib/request-retry";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 
 export type MessageSender = {
@@ -26,7 +28,9 @@ export type Message = {
     } | null;
 };
 
-export type MessageDeletedEvent = Pick<Message, "id" | "conversationId">;
+export type MessageDeletedEvent = Pick<Message, "id" | "conversationId"> & {
+    lastMessage: Pick<Message, "id" | "content" | "createdAt" | "updatedAt" | "senderId"> | null;
+};
 
 // id и дата вместе задают позицию, даже если сообщение уже удалено.
 export type MessageHistoryCursor = {
@@ -102,37 +106,20 @@ export const getMessages = async (
     }
 
     const queryString = query.toString();
-    const response = await authenticatedRequest(
-        `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
-        {
-            signal,
-        },
-    );
-
-    if (!response.ok) {
-        let message = "Failed to load messages";
-
-        try {
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
-        }
-
-        throw new Error(message);
-    }
-
-    const data = (await response.json()) as MessagesResponse;
-
-    return {
-        messages: data.messages,
-        nextCursor: data.nextCursor,
-        olderCursor: data.olderCursor,
-        newerCursor: data.newerCursor,
-        firstUnreadMessageId: data.firstUnreadMessageId,
-        // nextCursor по-прежнему обозначает только продолжение вверх, не вниз.
-        hasMore: data.nextCursor !== null,
-    };
+    // Timeout относится к одной странице, а не ко всей многостраничной сверке после reconnect.
+    return runRequestAttempt(async (requestSignal) => {
+        const response = await authenticatedRequest(
+            `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
+            { signal: requestSignal },
+        );
+        if (!response.ok) throw await createApiRequestError(response, "Failed to load messages");
+        const data = (await response.json()) as MessagesResponse;
+        return {
+            ...data,
+            // nextCursor по-прежнему обозначает только продолжение вверх, не вниз.
+            hasMore: data.nextCursor !== null,
+        };
+    }, { signal });
 };
 
 export const sendMessage = async (
@@ -199,7 +186,13 @@ export const editMessage = async (
     return data.message;
 };
 
-export const deleteMessage = async (messageId: string, authenticatedRequest: AuthenticatedRequest) => {
+// Получает id сообщения и функцию защищённых запросов.
+// Выполняет DELETE и проверяет успешность ответа.
+// Возвращает id удалённого сообщения, чат и актуальный preview для sidebar
+export const deleteMessage = async (
+    messageId: string,
+    authenticatedRequest: AuthenticatedRequest,
+): Promise<MessageDeletedEvent> => {
     const response = await authenticatedRequest(`${API_URL}/conversations/messages/${messageId}`, {
         method: "DELETE",
     });
@@ -216,4 +209,5 @@ export const deleteMessage = async (messageId: string, authenticatedRequest: Aut
 
         throw new Error(message);
     }
+    return (await response.json()) as MessageDeletedEvent;
 };

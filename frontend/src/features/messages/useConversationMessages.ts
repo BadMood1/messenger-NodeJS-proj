@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
+import { requestWithRetry, type RequestRetryState } from "../../lib/request-retry";
 import { applyKnownMessageChanges, mergeMessage, reconcileMessageHistory } from "./message-state-updates";
 import { reloadMessageHistory } from "./reload-message-history";
 import { useMessageScrollPosition } from "./useMessageScrollPosition";
@@ -40,6 +41,15 @@ export const useConversationMessages = ({
     const sendingIdsRef = useRef(new Set<string>());
     const historyVersionRef = useRef(0);
     const initialLoadingRef = useRef(true);
+    const hasLoadedHistoryRef = useRef(false);
+    const [initialLoadVersion, setInitialLoadVersion] = useState(0);
+    // initial ждёт повтор
+    const [initialRetry, setInitialRetry] = useState<RequestRetryState | null>(null);
+    const [historySyncRetry, setHistorySyncRetry] = useState<RequestRetryState | null>(null);
+    // Загрузка страницы вверх/вниз или последних сообщений ждёт повтор
+    const [paginationRetry, setPaginationRetry] = useState<RequestRetryState | null>(null);
+    const initialRetryRef = useRef<RequestRetryState | null>(null);
+    const historySyncRetryRef = useRef<RequestRetryState | null>(null);
     const receivedDuringLoadRef = useRef<Message[]>([]); // события, пришедшие пока initial GET ещё ждёт ответа
     // Помним удаления в текущем чате, чтобы запоздавший GET/socket не вернул сообщение или его цитату.
     const deletedMessageIdsRef = useRef(new Set<string>());
@@ -85,6 +95,9 @@ export const useConversationMessages = ({
         conversationIdRef.current = conversationId;
         historyVersionRef.current += 1; // отличать старые запросы от актуальных
         initialLoadingRef.current = true;
+        hasLoadedHistoryRef.current = false;
+        initialRetryRef.current = null;
+        historySyncRetryRef.current = null;
         receivedDuringLoadRef.current = []; // события предыдущего чата больше не нужны
         deletedMessageIdsRef.current.clear();
         editedMessagesRef.current.clear();
@@ -99,6 +112,9 @@ export const useConversationMessages = ({
 
     const {
         messagesContainerRef,
+        isScrolledAwayFromBottom,
+        updateIsScrolledAwayFromBottom,
+        scrollToBottom,
         scrollToBottomAfterUpdate,
         scrollToMessageAfterUpdate,
         isNearBottom,
@@ -172,7 +188,7 @@ export const useConversationMessages = ({
 
     // добавл. id в REF, убираем удалённые сообщения и очищает цитаты на них
     const handleMessageDeleted = useCallback(
-        ({ id, conversationId }: MessageDeletedEvent) => {
+        ({ id, conversationId }: Pick<MessageDeletedEvent, "id" | "conversationId">) => {
             if (!enabled || conversationId !== conversationIdRef.current) return;
             deletedMessageIdsRef.current.add(id);
             editedMessagesRef.current.delete(id);
@@ -183,16 +199,31 @@ export const useConversationMessages = ({
         [enabled, applyKnownChanges],
     );
 
+    // Получает ручной Retry первой загрузки.
+    // Перезапускает initial effect с mode: unread и новой ограниченной серией попыток.
+    // Сохраняет открытие возле непрочитанных вместо подмены первой загрузки сверкой latest.
+    const retryInitialMessages = useCallback(() => setInitialLoadVersion((version) => version + 1), []);
+
     // Socket вызывает только этот обработчик; state, REST и pagination остаются в message hook.
     const requestHistorySync = useCallback(() => {
         const currentConversationId = conversationIdRef.current;
         if (!currentConversationId) return;
+        // Reconnect продолжает ожидающий запрос; параллельную серию не создаём.
+        const waitingRetry = initialRetryRef.current ?? historySyncRetryRef.current;
+        if (waitingRetry) {
+            waitingRetry.retryNow();
+            return;
+        }
+        if (!hasLoadedHistoryRef.current && !initialLoadingRef.current) {
+            retryInitialMessages();
+            return;
+        }
         // запускает effect ниже
         setHistorySyncRequest({
             conversationId: currentConversationId,
             historyVersion: historyVersionRef.current,
         });
-    }, []);
+    }, [retryInitialMessages]);
 
     // ------- ПЕРВОЕ ОТКРЫТИЕ: ОКНО НЕПРОЧИТАННЫХ ИЛИ КОНЕЦ ЧАТА -------
     useEffect(() => {
@@ -217,12 +248,30 @@ export const useConversationMessages = ({
             setLoadingDirection(null);
             setPaginationError(null);
             setMessagesLoading(true);
+            setInitialRetry(null);
+            setHistorySyncRetry(null);
+            setPaginationRetry(null);
+            initialLoadingRef.current = true;
+            hasLoadedHistoryRef.current = false;
+            initialRetryRef.current = null;
+            historySyncRetryRef.current = null;
 
             try {
-                const result = await getMessages(conversationId, authenticatedRequest, {
-                    mode: "unread", // backend дальше сам решает в зависимости от есть ли unread messages
-                    signal: controller.signal,
-                });
+                const result = await requestWithRetry(
+                    () =>
+                        getMessages(conversationId, authenticatedRequest, {
+                            mode: "unread", // Каждый повтор сохраняет режим первого открытия.
+                            signal: controller.signal,
+                        }),
+                    {
+                        signal: controller.signal,
+                        onRetryState: (state) => {
+                            if (controller.signal.aborted) return;
+                            initialRetryRef.current = state;
+                            setInitialRetry(state);
+                        },
+                    },
+                );
 
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
                     // При наличии непрочитанного начинаем возле него, иначе показываем конец чата.
@@ -253,6 +302,7 @@ export const useConversationMessages = ({
                     );
                     // учитываем удаления и записываем результат
                     setMessages(applyKnownChanges(merged));
+                    hasLoadedHistoryRef.current = true;
                 }
             } catch (requestError) {
                 if (!controller.signal.aborted && conversationIdRef.current === conversationId) {
@@ -278,6 +328,7 @@ export const useConversationMessages = ({
     }, [
         authenticatedRequest,
         conversationId,
+        initialLoadVersion,
         enabled,
         resetScrollPosition,
         scrollToBottomAfterUpdate,
@@ -294,6 +345,7 @@ export const useConversationMessages = ({
             !historySyncRequest ||
             messagesLoading ||
             initialLoadingRef.current ||
+            !hasLoadedHistoryRef.current ||
             historySyncRequest.conversationId !== conversationId ||
             historySyncRequest.historyVersion !== historyVersionRef.current
         ) {
@@ -307,6 +359,9 @@ export const useConversationMessages = ({
         paginationControllerRef.current = null;
         setLoadingDirection(null);
         setHistorySyncError(null);
+        setHistorySyncRetry(null);
+        setPaginationRetry(null);
+        historySyncRetryRef.current = null;
 
         //  сообщения которые были на сервере до reload (исключ. sending/failed)
         const serverMessagesBeforeReload = messagesRef.current.filter((message) => !message.localStatus);
@@ -324,12 +379,23 @@ export const useConversationMessages = ({
         const syncHistory = async () => {
             try {
                 // Перечитываем историю сообщений с БД
-                const result = await reloadMessageHistory(
-                    historySyncRequest.conversationId,
-                    authenticatedRequest,
-                    oldestLoadedAt, // грузит до самой старой даты которая уже была в UI
-                    controller.signal,
-                    newestLoadedPosition,
+                const result = await requestWithRetry(
+                    () =>
+                        reloadMessageHistory(
+                            historySyncRequest.conversationId,
+                            authenticatedRequest,
+                            oldestLoadedAt, // грузит до самой старой даты которая уже была в UI
+                            controller.signal,
+                            newestLoadedPosition,
+                        ),
+                    {
+                        signal: controller.signal,
+                        onRetryState: (state) => {
+                            if (controller.signal.aborted) return;
+                            historySyncRetryRef.current = state;
+                            setHistorySyncRetry(state);
+                        },
+                    },
                 );
                 if (!isCurrent()) return;
 
@@ -392,7 +458,11 @@ export const useConversationMessages = ({
 
         return () => {
             controller.abort();
-            if (historySyncControllerRef.current === controller) historySyncControllerRef.current = null;
+            if (historySyncControllerRef.current === controller) {
+                historySyncControllerRef.current = null;
+                historySyncRetryRef.current = null;
+                setHistorySyncRetry(null);
+            }
         };
     }, [
         historySyncRequest,
@@ -407,7 +477,7 @@ export const useConversationMessages = ({
     ]);
 
     // ------- ПРОДОЛЖЕНИЕ ИСТОРИИ В ОБЕ СТОРОНЫ -------
-    // Получает направление: старее, новее или последнее окно после собственной отправки.
+    // Получает направление: старее, новее или последнее окно по кнопке/после отправки.
     // Загружает одну страницу, объединяет сообщения и обновляет только затронутую границу.
     // Сохраняет видимое сообщение; устаревший ответ другого чата не применяет.
     const loadHistoryPage = useCallback(
@@ -443,6 +513,8 @@ export const useConversationMessages = ({
                 paginationControllerRef.current?.abort(); // отменяем выполняющуюся страницу старого участка
                 historySyncControllerRef.current?.abort(); // отменяем сверку старую
                 historySyncControllerRef.current = null;
+                historySyncRetryRef.current = null;
+                setHistorySyncRetry(null);
             }
             const controller = new AbortController();
             paginationControllerRef.current = controller;
@@ -460,14 +532,24 @@ export const useConversationMessages = ({
                 historyVersionRef.current === historyVersion;
             setLoadingDirection(direction);
             setPaginationError(null);
+            setPaginationRetry(null);
 
             try {
-                const result = await getMessages(currentConversationId, authenticatedRequest, {
-                    cursor: cursor?.id,
-                    cursorCreatedAt: cursor?.createdAt,
-                    direction: direction === "latest" ? undefined : direction,
-                    signal: controller.signal,
-                });
+                const result = await requestWithRetry(
+                    () =>
+                        getMessages(currentConversationId, authenticatedRequest, {
+                            cursor: cursor?.id,
+                            cursorCreatedAt: cursor?.createdAt,
+                            direction: direction === "latest" ? undefined : direction,
+                            signal: controller.signal,
+                        }),
+                    {
+                        signal: controller.signal,
+                        onRetryState: (state) => {
+                            if (isCurrent()) setPaginationRetry(state);
+                        },
+                    },
+                );
                 // проверяем, чтобы запрос не устарел за время ожидания
                 if (!isCurrent()) return;
 
@@ -536,10 +618,21 @@ export const useConversationMessages = ({
         ],
     );
 
+    // Вызывается по кнопке перехода к последним сообщениям открытого чата.
+    // Если конец ещё не загружен — запрашивает последнее окно, иначе плавно прокручивает DOM.
+    // Использует существующие загрузку и защиту от устаревших ответов; прочтение не меняет.
+    const scrollToLatestMessages = () => {
+        if (!enabled || initialLoadingRef.current || historyConversationId !== conversationIdRef.current)
+            return;
+        if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
+        else scrollToBottom();
+    };
+
     // Получает scroll-событие контейнера сообщений из ChatPanel.
     // У нужного края запрашивает страницу, если соответствующий cursor ещё существует.
     // Ничего не запускает повторно при активном запросе или ошибке до Retry.
     const handleMessagesScroll = () => {
+        updateIsScrolledAwayFromBottom();
         if (paginationError) return;
         if (isNearBottom() && historyCursorsRef.current.newerCursor) void loadHistoryPage("newer");
         else if (isNearTop()) void loadHistoryPage("older");
@@ -705,12 +798,13 @@ export const useConversationMessages = ({
             throw new Error("No conversation selected");
         }
 
-        await deleteMessageRequest(messageId, authenticatedRequest);
+        const deletion = await deleteMessageRequest(messageId, authenticatedRequest);
 
         // DELETE старого чата не должен менять сообщения в уже открытом новом чате.
         if (conversationIdRef.current === currentConversationId) {
-            handleMessageDeleted({ id: messageId, conversationId: currentConversationId });
+            handleMessageDeleted(deletion);
         }
+        return deletion;
     };
 
     // Если сменился чат, то временно возвр. пустой массив (в return условие)
@@ -719,8 +813,19 @@ export const useConversationMessages = ({
     return {
         messages: isCurrentHistory ? messages : [],
         isLatestHistoryLoaded: isCurrentHistory && !messagesLoading && !historyCursorsRef.current.newerCursor,
+        isScrollToLatestButtonVisible:
+            isCurrentHistory &&
+            !messagesLoading &&
+            !messagesError &&
+            (isScrolledAwayFromBottom || Boolean(historyCursorsRef.current.newerCursor)),
+        isLoadingLatest: isCurrentHistory && loadingDirection === "latest",
+        scrollToLatestMessages,
         messagesLoading: Boolean(conversationId && enabled) && (!isCurrentHistory || messagesLoading),
         messagesError: isCurrentHistory ? messagesError : null,
+        initialRetry: isCurrentHistory ? initialRetry : null,
+        historySyncRetry: isCurrentHistory ? historySyncRetry : null,
+        paginationRetry: isCurrentHistory ? paginationRetry : null,
+        retryInitialMessages,
         historySyncError: isCurrentHistory ? historySyncError : null,
         requestHistorySync,
         firstUnreadMessageId: isCurrentHistory ? firstUnreadMessageId : null,

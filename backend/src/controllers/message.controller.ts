@@ -59,7 +59,7 @@ export const removeMessage = async (req: Request<{ messageId: string }>, res: Re
     const userId = res.locals.userId;
     const messageId = req.params.messageId;
 
-    await deleteMessage(messageId, userId);
+    const deletion = await deleteMessage(messageId, userId);
 
-    return res.status(204).send();
+    return res.status(200).json(deletion);
 };
