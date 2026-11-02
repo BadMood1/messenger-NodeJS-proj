@@ -812,6 +812,8 @@ export const useConversationMessages = ({
 
     return {
         messages: isCurrentHistory ? messages : [],
+        // Если у текущего чата есть olderCursor, значит, выше загруженных сообщений ещё существует история
+        hasOlderMessages: isCurrentHistory && Boolean(historyCursorsRef.current.olderCursor),
         isLatestHistoryLoaded: isCurrentHistory && !messagesLoading && !historyCursorsRef.current.newerCursor,
         isScrollToLatestButtonVisible:
             isCurrentHistory &&

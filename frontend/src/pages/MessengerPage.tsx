@@ -45,6 +45,7 @@ export const MessengerPage = () => {
     // Данные сообщений из хука
     const {
         messages,
+        hasOlderMessages,
         isLatestHistoryLoaded,
         isScrollToLatestButtonVisible,
         isLoadingLatest,
@@ -262,6 +263,7 @@ export const MessengerPage = () => {
                 key={selectedConversation?.id ?? "no-conversation"}
                 conversation={selectedConversation}
                 messages={messages}
+                hasOlderMessages={hasOlderMessages}
                 messagesLoading={messagesLoading}
                 messagesError={messagesError}
                 initialRetry={initialRetry}
