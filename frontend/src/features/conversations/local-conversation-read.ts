@@ -1,6 +1,6 @@
-import type { Conversation, LocalConversationRead } from "./conversations.api";
-import type { ClientMessage } from "../messages/messages.api";
-import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
+import type { Conversation, LocalConversationRead } from "./conversations.types";
+import type { ClientMessage } from "../messages/messages.types";
+import type { VisibleMessagePosition } from "../messages/scroll/useLastVisibleMessage";
 import type { ConversationMessageEvent } from "./conversation-state-updates";
 import { isMessageNewerThanLastMessage } from "./conversation-state-updates";
 import { isMessageAfterReadState, isReadPositionNewer } from "./conversation-read-state";

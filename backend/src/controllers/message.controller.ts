@@ -5,8 +5,8 @@ import {
     messageHistoryQuerySchema,
     sendMessageSchema,
 } from "../validators/message.schema.js";
-import { deleteMessage, editMessage, sendMessage } from "../services/message.service.js";
-import { getMessages } from "../services/message-history.service.js";
+import { deleteMessage, editMessage, sendMessage } from "../services/messages/message.service.js";
+import { getMessages } from "../services/messages/message-history.service.js";
 
 export const createMessage = async (req: Request<{ conversationId: string }>, res: Response) => {
     const senderId = res.locals.userId;

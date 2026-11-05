@@ -4,8 +4,8 @@ import { io, type Socket } from "socket.io-client";
 
 import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
-import type { Conversation, ConversationReadResult, ConversationReadState } from "../conversations/conversations.api";
-import type { Message, MessageDeletedEvent } from "../messages/messages.api";
+import type { Conversation, ConversationReadResult, ConversationReadState } from "../conversations/conversations.types";
+import type { Message, MessageDeletedEvent } from "../messages/messages.types";
 import { useConversationTyping } from "./useConversationTyping";
 import { useConversationPresence } from "./useConversationPresence";
 

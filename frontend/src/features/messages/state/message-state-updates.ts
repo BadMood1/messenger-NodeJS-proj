@@ -1,4 +1,4 @@
-import type { ClientMessage, Message } from "./messages.api";
+import type { ClientMessage, Message } from "../messages.types";
 import { sortMessagesForDisplay } from "./message-ordering";
 
 // REST-ответ и socket-событие проходят одинаковую замену, независимо от того, что пришло первым.

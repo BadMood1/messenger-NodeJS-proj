@@ -1,7 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import { z } from "zod";
 
-import { prisma } from "./prisma.js";
+import { prisma } from "../lib/prisma.js";
 
 // ------- ЗАПРОС И ОТВЕТ PRESENCE -------
 // Список собеседников определяет backend по userId из JWT, а не по данным клиента.

@@ -1,9 +1,10 @@
 import { MessageCircleMore, Search, UserRound, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Conversation } from "../../features/conversations/conversations.api";
+import type { Conversation } from "../../features/conversations/conversations.types";
 import type { UserPresence } from "../../features/realtime/useConversationPresence";
 import type { RequestRetryState } from "../../lib/request-retry";
+import { getInitials } from "../../lib/get-initials";
 import { RequestRetryStatus } from "./RequestRetryStatus";
 
 type ConversationSidebarProps = {
@@ -17,16 +18,6 @@ type ConversationSidebarProps = {
     onRetryConversations: () => void;
     selectedConversationId: string | null;
     onSelectConversation: (id: string) => void;
-};
-
-// Получаем до двух первых букв имени для avatar без картинки.
-const getInitials = (name: string) => {
-    return name
-        .trim()
-        .split(/\s+/)
-        .slice(0, 2)
-        .map((part) => part.charAt(0).toUpperCase())
-        .join("");
 };
 
 // Получает дату последнего сообщения или дату создания пустого диалога.

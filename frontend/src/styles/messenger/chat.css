@@ -1,0 +1,202 @@
+@layer components {
+    /* ==================== CHAT ==================== */
+
+    .flux-chat-panel {
+        @apply relative z-10 hidden h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/85 bg-linear-to-br from-white/98 via-[#f8fbff]/96 to-[#eef6ff]/92 shadow-[0_18px_52px_rgba(71,112,160,0.10)] dark:border-cyan-100/9 dark:from-[#07182a] dark:via-[#061423] dark:to-[#05111f] dark:shadow-[0_20px_58px_rgba(0,0,0,0.24)] lg:-ml-px lg:flex lg:rounded-[22px];
+    }
+
+    .flux-chat-header {
+        @apply flex h-18 shrink-0 items-center justify-between border-b border-blue-100/70 bg-white/48 px-4 backdrop-blur-sm dark:border-white/7 dark:bg-[#061526]/82 lg:h-20 lg:px-7;
+    }
+
+    .flux-chat-empty {
+        @apply flex h-full flex-col items-center justify-center gap-4 px-8 text-center text-slate-400 dark:text-slate-500;
+    }
+
+    .flux-chat-empty h2 {
+        @apply text-base font-semibold text-slate-700 dark:text-slate-200;
+    }
+
+    .flux-chat-empty p {
+        @apply mt-1 text-sm;
+    }
+
+    .flux-chat-content-state {
+        @apply flex h-full items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400;
+    }
+
+    .flux-chat-history {
+        @apply relative flex min-h-0 flex-1 overflow-hidden;
+    }
+
+    .flux-chat-scroll-date {
+        @apply pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 truncate rounded-full border border-blue-100/80 bg-white/95 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm shadow-blue-100/30 backdrop-blur-sm dark:border-white/8 dark:bg-[#0b1b2e]/95 dark:text-slate-400 dark:shadow-none;
+        max-width: calc(100% - 2rem);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-0.25rem);
+        transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s linear 120ms;
+    }
+
+    .flux-chat-scroll-date[data-visible="true"] {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        transition-delay: 0s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-chat-scroll-date {
+            transform: none;
+            transition: none;
+        }
+    }
+
+    .flux-scroll-to-latest {
+        @apply absolute bottom-4 right-4 z-10 flex size-11 cursor-pointer items-center justify-center rounded-full border border-blue-200/80 bg-white/95 text-blue-600 shadow-md shadow-blue-900/10 backdrop-blur-sm hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:cursor-default dark:border-cyan-200/15 dark:bg-[#10283e]/95 dark:text-cyan-200 dark:shadow-black/20 dark:hover:bg-[#16334c] lg:right-6;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: translateY(4rem);
+        scale: 1;
+        transition: opacity 150ms ease-out, transform 150ms ease-out, scale 120ms ease-out, background-color 120ms ease-out,
+            visibility 0s linear 150ms;
+    }
+
+    .flux-scroll-to-latest[data-visible="true"] {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translateY(0);
+        transition-delay: 0s;
+    }
+
+    /* На touch используем общий data-pressed из App: :active может оставаться после отпускания. */
+    @media (pointer: fine) {
+        .flux-scroll-to-latest[data-visible="true"]:active:not(:disabled) {
+            scale: 0.96;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-scroll-to-latest,
+        .flux-scroll-to-latest[data-visible="true"]:active:not(:disabled) {
+            transform: none;
+            scale: 1;
+            transition: none;
+        }
+    }
+
+    .flux-chat-messages {
+        @apply relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4 lg:px-8 lg:py-6;
+        /* Позицию при prepend восстанавливает наш хук, без второй коррекции браузером. */
+        overflow-anchor: none;
+        scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+        scrollbar-width: thin;
+    }
+
+    .flux-message-stack {
+        @apply flex min-h-full flex-col justify-end gap-3;
+    }
+
+    .flux-load-older {
+        @apply absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full border border-blue-100/80 bg-white/85 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm shadow-blue-100/35 backdrop-blur-sm dark:border-white/8 dark:bg-[#0b1b2e]/85 dark:text-slate-400 dark:shadow-none;
+    }
+
+    .flux-load-older-retry {
+        width: max-content;
+        max-width: calc(100% - 2rem);
+        @apply rounded-2xl p-0;
+    }
+
+    .flux-request-retry {
+        animation: flux-fade-in 120ms ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-request-retry { animation: none; }
+    }
+
+    .flux-message-day {
+        @apply my-1 flex items-center gap-3 text-xs font-medium text-slate-400 dark:text-slate-500;
+    }
+
+    .flux-message-day::before,
+    .flux-message-day::after {
+        @apply h-px flex-1 bg-blue-100/80 content-[''] dark:bg-white/7;
+    }
+
+    .flux-message-day span {
+        @apply rounded-full border border-blue-100/75 bg-white/65 px-3 py-1 shadow-sm shadow-blue-100/30 dark:border-white/8 dark:bg-white/4 dark:shadow-none;
+    }
+
+    .flux-message-placeholder {
+        --flux-message-meta-space: 3.25rem;
+
+        @apply relative w-fit max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] font-medium leading-5 shadow-sm md:max-w-lg;
+    }
+
+    .flux-message-text {
+        overflow-wrap: anywhere;
+    }
+
+    .flux-reply-preview {
+        @apply rounded-lg border-l-2 border-blue-400/70 bg-blue-400/8 px-2.5 py-1.5 text-xs leading-4 text-blue-700 dark:border-cyan-300/50 dark:bg-cyan-300/5 dark:text-cyan-200;
+    }
+
+    .flux-message-placeholder-incoming {
+        @apply rounded-bl-md border border-white/70 bg-slate-200/72 text-slate-700 shadow-slate-200/45 dark:border-white/5 dark:bg-[#13243a] dark:text-slate-200 dark:shadow-none;
+    }
+
+    .flux-message-placeholder-outgoing {
+        --flux-message-meta-space: 4.75rem;
+
+        @apply rounded-br-md border border-blue-200/55 bg-linear-to-br from-blue-100 via-blue-200/85 to-sky-200/85 text-slate-800 shadow-blue-200/35 dark:border-blue-400/12 dark:from-blue-600/42 dark:via-blue-600/34 dark:to-cyan-600/26 dark:text-blue-50 dark:shadow-none;
+    }
+
+    .flux-message-placeholder.flux-message-failed {
+        /* Лёгкий tint поверх исходного градиента, без замены цвета bubble. */
+        box-shadow: inset 0 0 0 100vmax rgb(244 63 94 / 7%);
+        border-color: rgb(244 63 94 / 25%);
+    }
+
+    .flux-message-meta-spacer {
+        display: inline-block;
+        width: var(--flux-message-meta-space);
+        height: 0;
+    }
+
+    .flux-message-meta {
+        @apply absolute bottom-2.5 right-4 flex items-center gap-1 whitespace-nowrap text-xs font-medium leading-none text-slate-400 dark:text-slate-400;
+    }
+
+    .flux-message-placeholder-outgoing .flux-message-meta {
+        @apply text-blue-600/70 dark:text-cyan-200/75;
+    }
+
+    /* ==================== COMPOSER ==================== */
+
+    .flux-composer {
+        @apply flex h-13 items-center gap-2 rounded-2xl border border-blue-100 bg-white/88 px-2.5 shadow-sm shadow-blue-100/50 transition-[border-color,box-shadow,background-color] focus-within:border-blue-300 focus-within:bg-white focus-within:shadow-blue-200/45 dark:border-white/10 dark:bg-white/5 dark:shadow-none dark:focus-within:border-cyan-400/35 dark:focus-within:bg-white/7;
+    }
+
+    .flux-composer-action {
+        @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-blue-200 text-blue-500 transition-colors hover:border-blue-400 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 dark:border-cyan-400/30 dark:text-cyan-300 dark:hover:bg-cyan-400/8 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-composer-input {
+        @apply min-w-0 flex-1 bg-transparent px-1 text-[15px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500;
+    }
+
+    .flux-composer-emoji {
+        @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 dark:text-slate-500 dark:hover:bg-white/6 dark:hover:text-cyan-300 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-composer-send {
+        @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-cyan-400 to-blue-600 text-white shadow-sm shadow-blue-500/25 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:from-cyan-400 dark:to-blue-500 dark:focus-visible:outline-cyan-300;
+    }
+
+    .flux-composer-send:disabled {
+        @apply cursor-not-allowed opacity-55 hover:scale-100;
+    }
+}

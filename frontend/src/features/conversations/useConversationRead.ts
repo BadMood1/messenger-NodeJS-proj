@@ -3,8 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { ApiRequestError, isTemporaryRequestError } from "../../lib/api-request-error";
 import { getRequestRetryDelay } from "../../lib/request-retry";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
-import { markConversationRead, type ConversationReadState, type ConversationReadResult } from "./conversations.api";
+import type { VisibleMessagePosition } from "../messages/scroll/useLastVisibleMessage";
+import { markConversationRead } from "./conversations.api";
+import type { ConversationReadState, ConversationReadResult } from "./conversations.types";
 
 // ------- КАК СОХРАНЯЕТСЯ ПРОЧТЕНИЕ -------
 // 1. useLastVisibleMessage определяет видимую позицию; MessengerPage передаёт её в этот хук.

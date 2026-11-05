@@ -1,5 +1,6 @@
-import type { AuthenticatedRequest } from "../auth/authenticated-request";
-import { getMessages, type Message, type MessageHistoryCursor } from "./messages.api";
+import type { AuthenticatedRequest } from "../../auth/authenticated-request";
+import { getMessages } from "../messages.api";
+import type { Message, MessageHistoryCursor } from "../messages.types";
 
 // Функция после reconnect заново загружает открытый участок от последнего загруженного сообщения до даты самого старого,
 //  которое уже было загружено в UI. Она последовательно запрашивает страницы через cursor, собирает сообщения без дублей,

@@ -2,70 +2,9 @@ import { API_URL } from "../../lib/config";
 import { createApiRequestError } from "../../lib/api-request-error";
 import { runRequestAttempt } from "../../lib/request-retry";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
+import type { Message, MessageDeletedEvent, MessagesPage, MessagesResponse } from "./messages.types";
 
-export type MessageSender = {
-    id: string;
-    name: string;
-    username: string;
-    image: string | null;
-};
-
-export type Message = {
-    id: string;
-    content: string;
-    clientMessageId: string | null; // у старых сообщений null; новые связаны с frontend по этому UUID
-    createdAt: string;
-    updatedAt: string;
-    senderId: string;
-    conversationId: string;
-    sender: MessageSender;
-    replyToId: string | null;
-    replyTo: {
-        id: string;
-        content: string;
-        updatedAt: string; // Дата правки цитируемого сообщения, не самого ответа.
-        sender: Pick<MessageSender, "id" | "name" | "username">;
-    } | null;
-};
-
-export type MessageDeletedEvent = Pick<Message, "id" | "conversationId"> & {
-    lastMessage: Pick<Message, "id" | "content" | "createdAt" | "updatedAt" | "senderId"> | null;
-};
-
-// id и дата вместе задают позицию, даже если сообщение уже удалено.
-export type MessageHistoryCursor = {
-    id: string;
-    createdAt: string;
-};
-
-type MessagesResponse = {
-    messages: Message[];
-    nextCursor: string | null;
-    olderCursor: MessageHistoryCursor | null;
-    newerCursor: MessageHistoryCursor | null;
-    firstUnreadMessageId: string | null;
-};
-
-// Только клиентские данные: backend и cursor работают с обычными Message.
-export type ClientMessage = Message & {
-    localStatus?: "sending" | "failed";
-    sendError?: string;
-    // Временная позиция optimistic-серии; после её завершения подтверждённая история сортируется по createdAt/id.
-    localDisplayOrder?: number;
-    // Только для POST: предыдущая ещё выполняющаяся отправка этого чата. (После неё сохр. сообщ.)
-    previousClientMessageId?: string;
-};
-
-export type MessagesPage = MessagesResponse & {
-    // Пока существующие хуки используют nextCursor/hasMore для загрузки вверх.
-    hasMore: boolean;
-};
-
-type SendMessageResponse = {
-    message: Message;
-};
-
-type EditMessageResponse = {
+type MessageResponse = {
     message: Message;
 };
 
@@ -145,20 +84,9 @@ export const sendMessage = async (
         body: JSON.stringify({ content, replyToId, clientMessageId, previousClientMessageId }),
     });
 
-    if (!response.ok) {
-        let message = "Failed to send message";
+    if (!response.ok) throw await createApiRequestError(response, "Failed to send message");
 
-        try {
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
-        }
-
-        throw new Error(message);
-    }
-
-    const data = (await response.json()) as SendMessageResponse;
+    const data = (await response.json()) as MessageResponse;
 
     return data.message;
 };
@@ -176,20 +104,9 @@ export const editMessage = async (
         body: JSON.stringify({ content }),
     });
 
-    if (!response.ok) {
-        let message = "Failed to edit message";
+    if (!response.ok) throw await createApiRequestError(response, "Failed to edit message");
 
-        try {
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
-        }
-
-        throw new Error(message);
-    }
-
-    const data = (await response.json()) as EditMessageResponse;
+    const data = (await response.json()) as MessageResponse;
 
     return data.message;
 };
@@ -205,17 +122,6 @@ export const deleteMessage = async (
         method: "DELETE",
     });
 
-    if (!response.ok) {
-        let message = "Failed to delete message";
-
-        try {
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
-        }
-
-        throw new Error(message);
-    }
+    if (!response.ok) throw await createApiRequestError(response, "Failed to delete message");
     return (await response.json()) as MessageDeletedEvent;
 };

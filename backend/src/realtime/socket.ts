@@ -1,12 +1,12 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
-import { verifyAccessToken } from "./jwt.js";
-import { prisma } from "./prisma.js";
+import { verifyAccessToken } from "../lib/jwt.js";
+import { prisma } from "../lib/prisma.js";
 import type { Message } from "../generated/prisma/client.js";
 import { createPresenceTracker } from "./socket-presence.js";
 import { createPresenceHandlers } from "./socket-presence-events.js";
 import { createTypingHandlers } from "./socket-typing.js";
-import type { ConversationReadResult } from "../services/conversation-read-result.js";
+import type { ConversationReadResult } from "../services/conversations/conversation-read-result.js";
 
 let socketServer: Server | null = null; // REST-сервис использует тот же io, который создаём при запуске
 

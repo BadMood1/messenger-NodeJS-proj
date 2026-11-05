@@ -1,5 +1,5 @@
-import type { Message, MessageDeletedEvent } from "../messages/messages.api";
-import type { Conversation } from "./conversations.api";
+import type { Message, MessageDeletedEvent } from "../messages/messages.types";
+import type { Conversation } from "./conversations.types";
 
 export type ConversationMessageEvent =
     | { type: "created" | "updated"; message: Message }

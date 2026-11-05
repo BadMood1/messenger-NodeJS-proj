@@ -1,5 +1,5 @@
-import type { Conversation, ConversationReadState } from "./conversations.api";
-import type { Message } from "../messages/messages.api";
+import type { Conversation, ConversationReadState } from "./conversations.types";
+import type { Message } from "../messages/messages.types";
 import { isMessageAfterReadState, isReadPositionNewer } from "./conversation-read-state";
 
 // Получает сообщение и подтверждённую границу собеседника.

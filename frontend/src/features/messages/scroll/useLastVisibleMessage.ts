@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 
-import type { ClientMessage } from "./messages.api";
-import { compareMessagesByCreatedAt } from "./message-ordering";
+import type { ClientMessage } from "../messages.types";
+import { compareMessagesByCreatedAt } from "../state/message-ordering";
 
 export type VisibleMessagePosition = {
     conversationId: string;

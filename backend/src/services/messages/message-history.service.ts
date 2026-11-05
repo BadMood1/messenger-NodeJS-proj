@@ -1,7 +1,7 @@
-import { AppError } from "../errors/app-error.js";
-import { Prisma } from "../generated/prisma/client.js";
-import { messageInclude } from "../lib/message-include.js";
-import { prisma } from "../lib/prisma.js";
+import { AppError } from "../../errors/app-error.js";
+import { Prisma } from "../../generated/prisma/client.js";
+import { messageInclude } from "./message-include.js";
+import { prisma } from "../../lib/prisma.js";
 
 type HistoryDirection = "older" | "newer";
 type MessagePosition = { id: string | null; createdAt: Date };

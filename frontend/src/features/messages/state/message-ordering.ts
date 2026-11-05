@@ -1,4 +1,4 @@
-import type { ClientMessage, Message } from "./messages.api";
+import type { ClientMessage, Message } from "../messages.types";
 
 type MessagePosition = Pick<Message, "id" | "createdAt">;
 type MessageDisplayPosition = Pick<

@@ -1,6 +1,6 @@
-import { prisma } from "../lib/prisma.js";
-import { AppError } from "../errors/app-error.js";
-import { Prisma } from "../generated/prisma/client.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../errors/app-error.js";
+import { Prisma } from "../../generated/prisma/client.js";
 import { getConversationReadSummaries } from "./conversation-read.service.js";
 
 // Если DM уже был — возвращает существующий. Если не было — создаёт и возвращает новый

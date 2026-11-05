@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 
-import type { ClientMessage } from "../../features/messages/messages.api";
-import { getMessageDateSeparatorLabel } from "../../features/messages/message-date-separators";
+import type { ClientMessage } from "../../../features/messages/messages.types";
+import { getMessageDateSeparatorLabel } from "../../../features/messages/message-date-separators";
 
 // Получает элементы в порядке истории и верхнюю границу видимой области.
 // Делит диапазон пополам, пока не найдёт первый элемент с нижним краем ниже этой границы.
