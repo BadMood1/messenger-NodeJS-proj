@@ -1,11 +1,12 @@
-import { MessageCircleMore, Search, UserRound, UsersRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { MessageCircleMore, Search, UserRound, UsersRound, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Conversation } from "../../features/conversations/conversations.types";
 import type { UserPresence } from "../../features/realtime/useConversationPresence";
 import type { RequestRetryState } from "../../lib/request-retry";
 import { getInitials } from "../../lib/get-initials";
 import { RequestRetryStatus } from "./RequestRetryStatus";
+import { NewConversationDialog } from "./conversations/NewConversationDialog";
 
 type ConversationSidebarProps = {
     conversations: Conversation[];
@@ -130,6 +131,9 @@ const ConversationRow = ({
     );
 };
 
+// Получает диалоги, статусы собеседников и обработчики выбора/повтора загрузки.
+// Фильтрует текущий список по имени или username без дополнительных запросов.
+// Возвращает sidebar с поиском, диалогами и мобильной навигацией.
 export const ConversationSidebar = ({
     conversations,
     presenceByUserId,
@@ -141,78 +145,116 @@ export const ConversationSidebar = ({
     onRetryConversations,
     selectedConversationId,
     onSelectConversation,
-}: ConversationSidebarProps) => (
-    <aside className="flux-conversation-sidebar">
-        <header className="flux-conversation-header">
-            <div className="flex items-center gap-3 lg:block">
-                <div className="h-10 w-10 shrink-0 lg:hidden">
-                    <img
-                        src="/brand/logo-light.png"
-                        alt="FLUX"
-                        className="h-10 w-10 object-contain dark:hidden"
-                    />
-                    <img
-                        src="/brand/logo-dark.png"
-                        alt="FLUX"
-                        className="hidden h-10 w-10 object-contain dark:block"
-                    />
+}: ConversationSidebarProps) => {
+    const [searchQuery, setSearchQuery] = useState("");
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const normalizedSearchQuery = searchQuery.trim().replace(/^@/, "").toLowerCase();
+
+    // Пустой запрос показывает все диалоги; остальные ищем по имени и username без учёта регистра.
+    const matchingConversations = normalizedSearchQuery
+        ? conversations.filter(({ user }) =>
+              user?.name.toLowerCase().includes(normalizedSearchQuery) ||
+              user?.username.toLowerCase().includes(normalizedSearchQuery),
+          )
+        : conversations;
+
+    // Вызывается при нажатии кнопки очистки поиска.
+    // Убирает введённый текст и возвращает фокус в поле.
+    // Список снова показывает все диалоги, выбранный чат сохраняется.
+    const clearConversationSearch = () => {
+        setSearchQuery("");
+        searchInputRef.current?.focus();
+    };
+
+    return (
+        <aside className="flux-conversation-sidebar">
+            <header className="flux-conversation-header">
+                <div className="flex items-center gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto]">
+                    <div className="h-10 w-10 shrink-0 lg:hidden">
+                        <img
+                            src="/brand/logo-light.png"
+                            alt="FLUX"
+                            className="h-10 w-10 object-contain dark:hidden"
+                        />
+                        <img
+                            src="/brand/logo-dark.png"
+                            alt="FLUX"
+                            className="hidden h-10 w-10 object-contain dark:block"
+                        />
+                    </div>
+
+                    <h1 className="hidden text-xl font-semibold tracking-tight text-slate-900 dark:text-white lg:block">
+                        Chats
+                    </h1>
+
+                    <div className="flux-conversation-search lg:col-span-2 lg:row-start-2">
+                        <Search size={17} strokeWidth={1.8} aria-hidden="true" />
+                        <input
+                            ref={searchInputRef}
+                            type="search"
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            placeholder="Search conversations..."
+                            aria-label="Search conversations"
+                        />
+                        <button
+                            type="button"
+                            className="flux-icon-button size-7 shrink-0 transition-[opacity,scale,background-color,color] duration-120 disabled:pointer-events-none disabled:opacity-0 motion-reduce:transition-none"
+                            aria-label="Clear conversation search"
+                            aria-hidden={!searchQuery}
+                            disabled={!searchQuery}
+                            onClick={clearConversationSearch}
+                        >
+                            <X size={16} strokeWidth={1.8} aria-hidden="true" />
+                        </button>
+                    </div>
+                    <NewConversationDialog />
                 </div>
+            </header>
 
-                <h1 className="hidden text-xl font-semibold tracking-tight text-slate-900 dark:text-white lg:block">
-                    Chats
-                </h1>
-
-                <label className="flux-conversation-search">
-                    <Search size={17} strokeWidth={1.8} aria-hidden="true" />
-                    <input
-                        type="search"
-                        placeholder="Search conversations..."
-                        aria-label="Search conversations"
-                    />
-                </label>
+            <div className="flux-conversation-list">
+                {!loading && !isOffline && <RequestRetryStatus retry={requestRetry} error={refreshError} onRetry={onRetryConversations} />}
+                {/* Показываем только одно состояние списка за раз. */}
+                {loading ? (
+                    <div className="flux-conversation-state" role={requestRetry ? undefined : "status"}>
+                        {requestRetry ? <RequestRetryStatus retry={requestRetry} onRetry={onRetryConversations} /> :
+                            isOffline ? "Waiting for a connection..." : "Loading conversations..."}
+                    </div>
+                ) : error ? (
+                    <div className="flux-conversation-state">
+                        <RequestRetryStatus retry={null} error={error} onRetry={onRetryConversations} />
+                    </div>
+                ) : conversations.length === 0 ? (
+                    <div className="flux-conversation-state">No conversations yet</div>
+                ) : matchingConversations.length === 0 ? (
+                    <div className="flux-conversation-state" role="status">No conversations found</div>
+                ) : (
+                    matchingConversations.map((conversation) => (
+                        <ConversationRow
+                            key={conversation.id}
+                            conversation={conversation}
+                            selected={conversation.id === selectedConversationId}
+                            isOnline={conversation.user ? presenceByUserId.get(conversation.user.id)?.isOnline === true : false}
+                            onSelect={onSelectConversation}
+                        />
+                    ))
+                )}
             </div>
-        </header>
 
-        <div className="flux-conversation-list">
-            {!loading && !isOffline && <RequestRetryStatus retry={requestRetry} error={refreshError} onRetry={onRetryConversations} />}
-            {/* Показываем только одно состояние списка за раз. */}
-            {loading ? (
-                <div className="flux-conversation-state" role={requestRetry ? undefined : "status"}>
-                    {requestRetry ? <RequestRetryStatus retry={requestRetry} onRetry={onRetryConversations} /> :
-                        isOffline ? "Waiting for a connection..." : "Loading conversations..."}
-                </div>
-            ) : error ? (
-                <div className="flux-conversation-state">
-                    <RequestRetryStatus retry={null} error={error} onRetry={onRetryConversations} />
-                </div>
-            ) : conversations.length === 0 ? (
-                <div className="flux-conversation-state">No conversations yet</div>
-            ) : (
-                conversations.map((conversation) => (
-                    <ConversationRow
-                        key={conversation.id}
-                        conversation={conversation}
-                        selected={conversation.id === selectedConversationId}
-                        isOnline={conversation.user ? presenceByUserId.get(conversation.user.id)?.isOnline === true : false}
-                        onSelect={onSelectConversation}
-                    />
-                ))
-            )}
-        </div>
-
-        <nav className="flux-mobile-nav" aria-label="Мобильная навигация">
-            <button type="button" className="text-blue-600 dark:text-cyan-300">
-                <MessageCircleMore size={20} strokeWidth={1.8} aria-hidden="true" />
-                Chats
-            </button>
-            <button type="button">
-                <UsersRound size={20} strokeWidth={1.8} aria-hidden="true" />
-                Friends
-            </button>
-            <button type="button">
-                <UserRound size={20} strokeWidth={1.8} aria-hidden="true" />
-                Profile
-            </button>
-        </nav>
-    </aside>
-);
+            <nav className="flux-mobile-nav" aria-label="Мобильная навигация">
+                <button type="button" className="text-blue-600 dark:text-cyan-300">
+                    <MessageCircleMore size={20} strokeWidth={1.8} aria-hidden="true" />
+                    Chats
+                </button>
+                <button type="button">
+                    <UsersRound size={20} strokeWidth={1.8} aria-hidden="true" />
+                    Friends
+                </button>
+                <button type="button">
+                    <UserRound size={20} strokeWidth={1.8} aria-hidden="true" />
+                    Profile
+                </button>
+            </nav>
+        </aside>
+    );
+};
