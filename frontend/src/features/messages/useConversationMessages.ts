@@ -3,6 +3,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { requestWithRetry, type RequestRetryState } from "../../lib/request-retry";
 import { applyKnownMessageChanges, mergeMessage, reconcileMessageHistory } from "./message-state-updates";
+import {
+    compareMessagesByCreatedAt,
+    getNextLocalDisplayOrder,
+    sortMessagesForDisplay,
+} from "./message-ordering";
 import { reloadMessageHistory } from "./reload-message-history";
 import { useMessageScrollPosition } from "./useMessageScrollPosition";
 import {
@@ -37,8 +42,8 @@ export const useConversationMessages = ({
     const [historyConversationId, setHistoryConversationId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ClientMessage[]>([]);
     const messagesRef = useRef(messages); // текущий список для стабильного обработчика reconnect
-    // Id сообщ., которые прямо сейчас отправляются
-    const sendingIdsRef = useRef(new Set<string>());
+    // Текущие POST: данные нужны и для защиты от дублей, и для связи следующей отправки с предыдущей.
+    const sendingMessagesRef = useRef(new Map<string, ClientMessage>());
     const historyVersionRef = useRef(0);
     const initialLoadingRef = useRef(true);
     const hasLoadedHistoryRef = useRef(false);
@@ -364,7 +369,10 @@ export const useConversationMessages = ({
         historySyncRetryRef.current = null;
 
         //  сообщения которые были на сервере до reload (исключ. sending/failed)
-        const serverMessagesBeforeReload = messagesRef.current.filter((message) => !message.localStatus);
+        // Для границы reconnect используем серверный порядок: локальные bubbles могут стоять иначе.
+        const serverMessagesBeforeReload = messagesRef.current
+            .filter((message) => !message.localStatus)
+            .sort(compareMessagesByCreatedAt);
         const serverIdsBeforeReload = new Set(serverMessagesBeforeReload.map((message) => message.id));
         // После Send из старой истории нужен конец чата; при обычном reconnect сохраняем открытое окно.
         const opensLatest = latestWindowRequestedRef.current;
@@ -426,7 +434,7 @@ export const useConversationMessages = ({
                 setMessages((messagesNow) =>
                     // применяем edit, delete, если есть
                     applyKnownChanges(
-                        // собрали новую историю сообщ., сохранили локальные отправки и reloaded сообщения, убрали дубли и отсортировали по времени
+                        // собрали новую историю сообщ., сохранили локальные отправки и их порядок, убрали дубли
                         reconcileMessageHistory(
                             messagesNow,
                             [...result.messages, ...deferredMessages],
@@ -659,10 +667,18 @@ export const useConversationMessages = ({
             void loadHistoryPage("newer");
     }, [messages, messagesLoading, loadingDirection, paginationError, isNearBottom, loadHistoryPage]);
 
+    // Получает id чата.
+    // Находит последнюю отправку этого чата, чей POST ещё выполняется.
+    // Возвращает её clientMessageId или undefined, если зависимость уже не нужна.
+    const getPreviousPendingClientMessageId = (currentConversationId: string) =>
+        [...sendingMessagesRef.current.values()]
+            .filter((message) => message.conversationId === currentConversationId)
+            .at(-1)?.clientMessageId ?? undefined;
+
     // выполняет POST и заменяет temp-сообщение на серверное, либо помечает его как failed.
     const deliverMessage = async (pending: ClientMessage) => {
-        if (sendingIdsRef.current.has(pending.id)) return; // проверка повторной отправки, если пользователь быстро нажал кнопку несколько раз.
-        sendingIdsRef.current.add(pending.id);
+        if (sendingMessagesRef.current.has(pending.id)) return; // проверка повторной отправки, если пользователь быстро нажал кнопку несколько раз.
+        sendingMessagesRef.current.set(pending.id, pending); // регистрируем отправку
 
         const historyVersion = historyVersionRef.current;
         // Проверяем и поколение чата: уйти и вернуться в тот же id тоже считается сменой истории.
@@ -676,6 +692,7 @@ export const useConversationMessages = ({
                 authenticatedRequest,
                 pending.replyToId ?? undefined,
                 pending.clientMessageId ?? undefined, // тот же UUID при первой отправке и при Retry
+                pending.previousClientMessageId,
             );
             // Проверяем можно ли обновл. текущий чат
             if (isCurrent()) {
@@ -691,20 +708,24 @@ export const useConversationMessages = ({
             if (isCurrent()) {
                 // меняем state
                 setMessages((current) =>
-                    current.map((item) =>
-                        item.id === pending.id // нашли наше временное сообщение
-                            ? {
-                                  ...item,
-                                  localStatus: "failed",
-                                  sendError:
-                                      error instanceof Error ? error.message : "Failed to send message",
-                              }
-                            : item,
+                    // если есть другие sending, сохр. временный порядок, если больше нет - убираем localDisplayOrder
+                    // у подтвержденных сообщ. и сортируем их по серверным датам (по createdAt)
+                    sortMessagesForDisplay(
+                        current.map((item) =>
+                            item.id === pending.id // нашли наше временное сообщение
+                                ? {
+                                      ...item,
+                                      localStatus: "failed",
+                                      sendError:
+                                          error instanceof Error ? error.message : "Failed to send message",
+                                  }
+                                : item,
+                        ),
                     ),
                 );
             }
         } finally {
-            sendingIdsRef.current.delete(pending.id);
+            sendingMessagesRef.current.delete(pending.id);
         }
     };
 
@@ -721,6 +742,7 @@ export const useConversationMessages = ({
         const pending: ClientMessage = {
             id: `temp:${clientMessageId}`, // локальный id для UI, не серверный Message.id
             clientMessageId,
+            previousClientMessageId: getPreviousPendingClientMessageId(currentConversationId),
             content,
             createdAt: now,
             updatedAt: now,
@@ -739,7 +761,11 @@ export const useConversationMessages = ({
             localStatus: "sending",
         };
         scrollToBottomAfterUpdate(); // просим существующий useLayoutEffect прокрутить вниз после отрисовки.
-        setMessages((current) => [...current, pending]); // добавляем сообщ. в конец списка, чтобы сразу показать его в UI.
+        // Считаем позицию по актуальному state, включая несколько Send до следующего рендера.
+        setMessages((current) => [
+            ...current,
+            { ...pending, localDisplayOrder: getNextLocalDisplayOrder(current, Date.parse(now)) },
+        ]); // добавляем сообщ. в конец списка, чтобы сразу показать его в UI.
         // Если читали середину переписки, собственная отправка открывает последнее окно без пробела в истории.
         if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
         // Ошибки POST остаются в bubble, а composer можно сразу использовать снова.
@@ -748,10 +774,11 @@ export const useConversationMessages = ({
 
     const retryMessage = (messageId: string) => {
         const pending = messages.find((message) => message.id === messageId);
-        if (!pending || pending.localStatus !== "failed" || sendingIdsRef.current.has(messageId)) return;
+        if (!pending || pending.localStatus !== "failed" || sendingMessagesRef.current.has(messageId)) return;
         const now = new Date().toISOString();
         const retried: ClientMessage = {
             ...pending,
+            previousClientMessageId: getPreviousPendingClientMessageId(pending.conversationId),
             createdAt: now,
             updatedAt: now,
             localStatus: "sending",
@@ -759,7 +786,10 @@ export const useConversationMessages = ({
         };
         // Retry — новая попытка сейчас: переносим тот же temp вниз и сразу обновляем время.
         scrollToBottomAfterUpdate();
-        setMessages((current) => [...current.filter((message) => message.id !== messageId), retried]);
+        setMessages((current) => [
+            ...current.filter((message) => message.id !== messageId),
+            { ...retried, localDisplayOrder: getNextLocalDisplayOrder(current, Date.parse(now)) },
+        ]);
         if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
         void deliverMessage(retried);
     };
@@ -789,7 +819,7 @@ export const useConversationMessages = ({
 
         // Failed bubble существует только локально: temp id не отправляем в DELETE API.
         if (messages.some((message) => message.id === messageId && message.localStatus === "failed")) {
-            if (sendingIdsRef.current.has(messageId)) return;
+            if (sendingMessagesRef.current.has(messageId)) return;
             setMessages((current) => current.filter((message) => message.id !== messageId));
             return;
         }

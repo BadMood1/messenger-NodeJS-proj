@@ -4,18 +4,21 @@ import { Prisma } from "../generated/prisma/client.js";
 import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../lib/socket.js";
 import { createMessageSendTiming } from "../lib/message-send-timing.js";
 import { messageInclude } from "../lib/message-include.js";
+import { rejectPendingMessageSend, sendMessageInOrder } from "./message-send-order.js";
 
-// Получает чат, автора, текст и необязательные id для Reply и Retry.
+// Получает чат, автора, текст и необязательные id для Reply, Retry и порядка отправки.
 // Проверяет права, возвращает существующее сообщение либо сохраняет новое и рассылает message:created.
-// Возвращает серверное сообщение с sender и reply preview; после сохранения повторно участников не запрашивает.
+// Возвращает серверное сообщение с sender и reply preview; данные для ответа получает до сохранения.
 export const sendMessage = async (
     conversationId: string,
     senderId: string,
     content: string,
     replyToId?: string,
     clientMessageId?: string,
+    previousClientMessageId?: string,
 ) => {
     const timing = createMessageSendTiming();
+    const sendOrder = { conversationId, senderId, clientMessageId, previousClientMessageId };
 
     // Использует senderId и clientMessageId текущей отправки.
     // Ищет ранее сохранённое сообщение вместе с данными автора и reply preview.
@@ -29,12 +32,20 @@ export const sendMessage = async (
     };
 
     try {
-        // ------- УЧАСТНИКИ И RETRY -------
-        // Запросы независимы: одновременно получаем участников и ищем повтор clientMessageId.
-        // Этот же список участников используем для доставки после сохранения.
-        const [members, existing] = await Promise.all([
+        // ------- ПРОВЕРКИ И ДАННЫЕ ОТВЕТА -------
+        // Одновременно получаем участников, ищем Retry и загружаем автора с необязательной цитатой.
+        // Эти данные используем для ответа и доставки, чтобы не читать их после INSERT.
+        const [members, existing, sender, replyTo] = await Promise.all([
             prisma.conversationMember.findMany({ where: { conversationId }, select: { userId: true } }),
             findExisting(),
+            prisma.user.findUnique({ where: { id: senderId }, select: messageInclude.sender.select }),
+            // Если это Reply, сразу получаем preview из того же чата; иначе запрос не нужен.
+            replyToId
+                ? prisma.message.findFirst({
+                      where: { id: replyToId, conversationId },
+                      select: messageInclude.replyTo.select,
+                  })
+                : null,
         ]);
         timing.recordStage("checksMs");
 
@@ -49,64 +60,72 @@ export const sendMessage = async (
         }
         if (existing) return existing; // POST уже сохранился, а ответ потерялся — Retry возвращает ту же запись
 
+        if (!sender) {
+            throw new AppError(404, "User not found");
+        }
+
         // ------- REPLY -------
-        if (replyToId) {
-            // Не позволяем цитировать сообщения из другого чата, даже зная их id.
-            const replyTo = await prisma.message.findFirst({
-                where: { id: replyToId, conversationId },
-                select: { id: true },
-            });
-            timing.recordStage("replyMs");
-            if (!replyTo) {
-                throw new AppError(400, "Reply message must belong to this conversation");
-            }
+        // Не позволяем цитировать сообщения из другого чата, даже зная их id.
+        if (replyToId && !replyTo) {
+            throw new AppError(400, "Reply message must belong to this conversation");
         }
 
         // ------- СОХРАНЕНИЕ И ДОСТАВКА -------
         // Создаём само сообщение
-        try {
-            // Сначала сохраняем в БД
-            const message = await prisma.message.create({
-                data: {
-                    content,
-                    senderId,
-                    conversationId,
-                    replyToId: replyToId ?? null,
-                    clientMessageId: clientMessageId ?? null, // сохраняем связь с temp-сообщением
-                },
+        return await sendMessageInOrder(sendOrder, async (previous) => {
+            timing.recordStage("orderWaitMs");
+            // Время задаёт backend. Даже при совпадении миллисекунд следующая запись будет строго позже предыдущей.
+            const createdAt = new Date(Math.max(Date.now(), previous ? previous.createdAt.getTime() + 1 : 0));
+            try {
+                // Сначала сохраняем в БД. Без include Prisma не загружает связи после INSERT.
+                const savedMessage = await prisma.message.create({
+                    data: {
+                        content,
+                        senderId,
+                        conversationId,
+                        replyToId: replyToId ?? null,
+                        clientMessageId: clientMessageId ?? null, // сохраняем связь с temp-сообщением
+                        createdAt,
+                        updatedAt: createdAt,
+                    },
+                });
+                timing.recordStage("createMs");
 
-                // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос
-                include: messageInclude,
-            });
-            timing.recordStage("createMs");
+                // Сразу отдаём данные отправителя, чтобы front не делал ещё один запрос.
+                // Автор и preview уже получены из БД; собираем прежний формат ответа без новых запросов.
+                const message = { ...savedMessage, sender, replyTo };
 
-            // После сохр. в БД публикуем в сокетах; участники уже получены в начале отправки.
-            await publishMessageCreated(
-                message,
-                members.map((member) => member.userId),
-            ).catch(() => {
-                console.error("[socket] Failed to publish message:created");
-            });
-            timing.recordStage("publishMs");
-            return message;
-        } catch (error) {
-            timing.recordStage("createFailedMs");
-            // Два одновременных POST могли оба не найти запись; unique разрешит создать только одну.
-            if (
-                clientMessageId &&
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === "P2002"
-            ) {
-                const existing = await findExisting();
-                timing.recordStage("retryLookupMs");
-                // Конкурентный запрос тоже мог использовать этот client id в другом чате.
-                if (existing && existing.conversationId !== conversationId) {
-                    throw new AppError(409, "Client message id already used in another conversation");
+                // После сохр. в БД публикуем в сокетах; участники уже получены в начале отправки.
+                await publishMessageCreated(
+                    message,
+                    members.map((member) => member.userId),
+                ).catch(() => {
+                    console.error("[socket] Failed to publish message:created");
+                });
+                timing.recordStage("publishMs");
+                return message;
+            } catch (error) {
+                timing.recordStage("createFailedMs");
+                // Два одновременных POST могли оба не найти запись; unique разрешит создать только одну.
+                if (
+                    clientMessageId &&
+                    error instanceof Prisma.PrismaClientKnownRequestError &&
+                    error.code === "P2002"
+                ) {
+                    const existing = await findExisting();
+                    timing.recordStage("retryLookupMs");
+                    // Конкурентный запрос тоже мог использовать этот client id в другом чате.
+                    if (existing && existing.conversationId !== conversationId) {
+                        throw new AppError(409, "Client message id already used in another conversation");
+                    }
+                    if (existing) return existing;
                 }
-                if (existing) return existing;
+                throw error;
             }
-            throw error;
-        }
+        });
+    } catch (error) {
+        rejectPendingMessageSend(sendOrder, error);
+        throw error;
     } finally {
         timing.finish();
     }
@@ -131,6 +150,8 @@ export const editMessage = async (messageId: string, userId: string, content: st
 
     // возвр. обновлённый message и данные sender'а
     const updatedMessage = await prisma.message.update({
+        // Возвращаемые sender и reply preview загружаем через JOIN вместо отдельных чтений связей.
+        relationLoadStrategy: "join",
         where: {
             id: messageId,
         },

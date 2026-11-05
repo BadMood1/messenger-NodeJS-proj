@@ -46,10 +46,14 @@ type MessagesResponse = {
     firstUnreadMessageId: string | null;
 };
 
-// Только клиентский статус: backend и cursor работают с обычными Message.
+// Только клиентские данные: backend и cursor работают с обычными Message.
 export type ClientMessage = Message & {
     localStatus?: "sending" | "failed";
     sendError?: string;
+    // Временная позиция optimistic-серии; после её завершения подтверждённая история сортируется по createdAt/id.
+    localDisplayOrder?: number;
+    // Только для POST: предыдущая ещё выполняющаяся отправка этого чата. (После неё сохр. сообщ.)
+    previousClientMessageId?: string;
 };
 
 export type MessagesPage = MessagesResponse & {
@@ -102,24 +106,27 @@ export const getMessages = async (
     }
 
     if (limit) {
-        query.set("limit", String(limit)); // в бэкэнде от 1 до 50, по умолчанию 30
+        query.set("limit", String(limit)); // в бэкэнде от 1 до 50, по умолчанию 50
     }
 
     const queryString = query.toString();
     // Timeout относится к одной странице, а не ко всей многостраничной сверке после reconnect.
-    return runRequestAttempt(async (requestSignal) => {
-        const response = await authenticatedRequest(
-            `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
-            { signal: requestSignal },
-        );
-        if (!response.ok) throw await createApiRequestError(response, "Failed to load messages");
-        const data = (await response.json()) as MessagesResponse;
-        return {
-            ...data,
-            // nextCursor по-прежнему обозначает только продолжение вверх, не вниз.
-            hasMore: data.nextCursor !== null,
-        };
-    }, { signal });
+    return runRequestAttempt(
+        async (requestSignal) => {
+            const response = await authenticatedRequest(
+                `${API_URL}/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ""}`,
+                { signal: requestSignal },
+            );
+            if (!response.ok) throw await createApiRequestError(response, "Failed to load messages");
+            const data = (await response.json()) as MessagesResponse;
+            return {
+                ...data,
+                // nextCursor по-прежнему обозначает только продолжение вверх, не вниз.
+                hasMore: data.nextCursor !== null,
+            };
+        },
+        { signal },
+    );
 };
 
 export const sendMessage = async (
@@ -128,13 +135,14 @@ export const sendMessage = async (
     authenticatedRequest: AuthenticatedRequest,
     replyToId?: string,
     clientMessageId?: string,
+    previousClientMessageId?: string,
 ) => {
     const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content, replyToId, clientMessageId }),
+        body: JSON.stringify({ content, replyToId, clientMessageId, previousClientMessageId }),
     });
 
     if (!response.ok) {

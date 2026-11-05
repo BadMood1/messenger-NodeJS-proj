@@ -401,8 +401,13 @@ export const ChatPanel = ({
                                               messages[index - 1]?.createdAt,
                                               currentDate,
                                           );
+                                // clientMessageId сохраняет тот же bubble после замены temp id на server id.
                                 return (
-                                    <Fragment key={message.id}>
+                                    <Fragment
+                                        key={message.clientMessageId
+                                            ? `client:${message.senderId}:${message.clientMessageId}`
+                                            : message.id}
+                                    >
                                         {dateSeparatorLabel && (
                                             <div
                                                 className="flux-message-day"

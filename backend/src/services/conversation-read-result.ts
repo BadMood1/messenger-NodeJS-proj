@@ -1,4 +1,4 @@
-import { Prisma, type ConversationMember } from "../generated/prisma/client.js";
+import type { Prisma, ConversationMember } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 
 type SavedReadState = Pick<
@@ -7,7 +7,7 @@ type SavedReadState = Pick<
 >;
 
 // Получает подтверждённую границу прочтения пользователя.
-// В одном снимке сообщений считает остаток непрочитанных и получает последнее сообщение.
+// Одним SQL-запросом считает остаток непрочитанных и получает последнее сообщение в том же снимке.
 // Возвращает готовый результат для ответа PATCH и события conversation:read.
 export const getConversationReadResult = async (readState: SavedReadState) => {
     const unreadWhere: Prisma.MessageWhereInput = {
@@ -27,18 +27,25 @@ export const getConversationReadResult = async (readState: SavedReadState) => {
         }
     }
 
-    return prisma.$transaction(
-        async (tx) => {
-            const unreadCount = await tx.message.count({ where: unreadWhere });
-            const lastMessage = await tx.message.findFirst({
-                where: { conversationId: readState.conversationId },
+    // JOIN объединяет preview и счётчик в один запрос: отдельная транзакция для снимка уже не нужна.
+    const conversation = await prisma.conversation.findUnique({
+        where: { id: readState.conversationId },
+        relationLoadStrategy: "join",
+        select: {
+            _count: { select: { messages: { where: unreadWhere } } },
+            messages: {
                 orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                take: 1,
                 select: { id: true, content: true, createdAt: true, updatedAt: true, senderId: true },
-            });
-            return { readState, unreadCount, lastMessage };
+            },
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+    });
+
+    return {
+        readState,
+        unreadCount: conversation?._count.messages ?? 0,
+        lastMessage: conversation?.messages[0] ?? null,
+    };
 };
 
 export type ConversationReadResult = Awaited<ReturnType<typeof getConversationReadResult>>;

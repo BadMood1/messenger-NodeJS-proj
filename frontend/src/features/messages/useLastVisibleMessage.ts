@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 
 import type { ClientMessage } from "./messages.api";
+import { compareMessagesByCreatedAt } from "./message-ordering";
 
 export type VisibleMessagePosition = {
     conversationId: string;
@@ -37,9 +38,10 @@ export const useLastVisibleMessage = ({
         let isObservationStopped = false; // закончилось ли именно это наблюдение
         const visibleMessageIds = new Set<string>(); // id сообщений нижняя часть которых сейчас полностью видна
         // Временные sending/failed сообщения не могут быть границей прочтения в backend.
-        const serverMessages = messages.filter(
-            (message) => message.conversationId === conversationId && !message.localStatus,
-        );
+        // Границу прочтения определяем по серверным датам, независимо от локального порядка bubbles.
+        const serverMessages = messages
+            .filter((message) => message.conversationId === conversationId && !message.localStatus)
+            .sort(compareMessagesByCreatedAt);
         const serverMessageIds = new Set(serverMessages.map((message) => message.id));
 
         // Вызывается после изменения видимости сообщений или активности вкладки.

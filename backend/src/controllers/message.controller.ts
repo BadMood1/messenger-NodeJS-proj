@@ -15,9 +15,16 @@ export const createMessage = async (req: Request<{ conversationId: string }>, re
     const conversationId = req.params.conversationId;
 
     // Проверяем body и получаем уже очищенный content
-    const { content, replyToId, clientMessageId } = sendMessageSchema.parse(req.body);
+    const { content, replyToId, clientMessageId, previousClientMessageId } = sendMessageSchema.parse(req.body);
 
-    const message = await sendMessage(conversationId, senderId, content, replyToId, clientMessageId);
+    const message = await sendMessage(
+        conversationId,
+        senderId,
+        content,
+        replyToId,
+        clientMessageId,
+        previousClientMessageId,
+    );
 
     return res.status(201).json({
         message,
