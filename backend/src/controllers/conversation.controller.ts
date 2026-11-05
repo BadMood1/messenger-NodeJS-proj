@@ -30,13 +30,13 @@ export const getConversations = async (req: Request, res: Response) => {
 
 // Получает id чата из URL, messageId из body и userId из проверенного access token.
 // Проверяет входные данные и передаёт отметку прочтения в service.
-// Возвращает сохранённую границу в поле readState, не отмечая сообщения другого участника.
+// Возвращает сохранённую границу, актуальный счётчик и последнее сообщение этого чата.
 export const markConversationAsRead = async (req: Request<{ conversationId: string }>, res: Response) => {
     const { conversationId } = conversationParamsSchema.parse(req.params);
     const { messageId } = markConversationReadSchema.parse(req.body);
     const userId = res.locals.userId;
 
-    const readState = await markConversationRead(conversationId, userId, messageId);
+    const readResult = await markConversationRead(conversationId, userId, messageId);
 
-    return res.status(200).json({ readState });
+    return res.status(200).json(readResult);
 };

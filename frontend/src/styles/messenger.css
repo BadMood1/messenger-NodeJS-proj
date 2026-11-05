@@ -158,8 +158,35 @@
         @apply from-teal-100 via-emerald-200 to-cyan-300 dark:from-teal-800 dark:via-emerald-800 dark:to-cyan-800;
     }
 
+    .flux-conversation-unread-slot {
+        @apply grid shrink-0;
+        grid-template-columns: 0fr;
+        margin-left: 0;
+        opacity: 0;
+        visibility: hidden;
+        transform: scale(0.9);
+        transition: grid-template-columns 150ms ease-out, margin-left 150ms ease-out,
+            opacity 150ms ease-out, transform 150ms ease-out, visibility 0s linear 150ms;
+    }
+
+    .flux-conversation-unread-slot[data-visible="true"] {
+        grid-template-columns: 1fr;
+        margin-left: 0.5rem;
+        opacity: 1;
+        visibility: visible;
+        transform: scale(1);
+        transition-delay: 0s;
+    }
+
     .flux-conversation-unread {
-        @apply flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-cyan-400 to-blue-600 px-1.5 text-[11px] font-semibold leading-none text-white shadow-sm shadow-blue-400/25 dark:from-cyan-400 dark:to-blue-500 dark:shadow-none;
+        @apply flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-cyan-400 to-blue-600 px-1.5 text-[11px] font-semibold tabular-nums leading-none text-white shadow-sm shadow-blue-400/25 dark:from-cyan-400 dark:to-blue-500 dark:shadow-none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-conversation-unread-slot {
+            transform: none;
+            transition: none;
+        }
     }
 
     .flux-chat-avatar {
@@ -209,6 +236,68 @@
         @apply flex h-full items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400;
     }
 
+    .flux-chat-history {
+        @apply relative flex min-h-0 flex-1 overflow-hidden;
+    }
+
+    .flux-chat-scroll-date {
+        @apply pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 truncate rounded-full border border-blue-100/80 bg-white/95 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm shadow-blue-100/30 backdrop-blur-sm dark:border-white/8 dark:bg-[#0b1b2e]/95 dark:text-slate-400 dark:shadow-none;
+        max-width: calc(100% - 2rem);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-0.25rem);
+        transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s linear 120ms;
+    }
+
+    .flux-chat-scroll-date[data-visible="true"] {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        transition-delay: 0s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-chat-scroll-date {
+            transform: none;
+            transition: none;
+        }
+    }
+
+    .flux-scroll-to-latest {
+        @apply absolute bottom-4 right-4 z-10 flex size-11 cursor-pointer items-center justify-center rounded-full border border-blue-200/80 bg-white/95 text-blue-600 shadow-md shadow-blue-900/10 backdrop-blur-sm hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:cursor-default dark:border-cyan-200/15 dark:bg-[#10283e]/95 dark:text-cyan-200 dark:shadow-black/20 dark:hover:bg-[#16334c] lg:right-6;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: translateY(4rem);
+        scale: 1;
+        transition: opacity 150ms ease-out, transform 150ms ease-out, scale 120ms ease-out, background-color 120ms ease-out,
+            visibility 0s linear 150ms;
+    }
+
+    .flux-scroll-to-latest[data-visible="true"] {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translateY(0);
+        transition-delay: 0s;
+    }
+
+    /* На touch используем общий data-pressed из App: :active может оставаться после отпускания. */
+    @media (pointer: fine) {
+        .flux-scroll-to-latest[data-visible="true"]:active:not(:disabled) {
+            scale: 0.96;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-scroll-to-latest,
+        .flux-scroll-to-latest[data-visible="true"]:active:not(:disabled) {
+            transform: none;
+            scale: 1;
+            transition: none;
+        }
+    }
+
     .flux-chat-messages {
         @apply relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4 lg:px-8 lg:py-6;
         /* Позицию при prepend восстанавливает наш хук, без второй коррекции браузером. */
@@ -225,8 +314,18 @@
         @apply absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full border border-blue-100/80 bg-white/85 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm shadow-blue-100/35 backdrop-blur-sm dark:border-white/8 dark:bg-[#0b1b2e]/85 dark:text-slate-400 dark:shadow-none;
     }
 
-    .flux-load-older-error {
-        @apply absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full border border-rose-200/80 bg-white/90 px-3 py-1 text-xs font-medium text-rose-600 shadow-sm shadow-rose-100/45 backdrop-blur-sm dark:border-rose-400/20 dark:bg-[#21131f]/90 dark:text-rose-300 dark:shadow-none;
+    .flux-load-older-retry {
+        width: max-content;
+        max-width: calc(100% - 2rem);
+        @apply rounded-2xl p-0;
+    }
+
+    .flux-request-retry {
+        animation: flux-fade-in 120ms ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-request-retry { animation: none; }
     }
 
     .flux-message-day {

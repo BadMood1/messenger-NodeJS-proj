@@ -15,9 +15,16 @@ export const createMessage = async (req: Request<{ conversationId: string }>, re
     const conversationId = req.params.conversationId;
 
     // Проверяем body и получаем уже очищенный content
-    const { content, replyToId, clientMessageId } = sendMessageSchema.parse(req.body);
+    const { content, replyToId, clientMessageId, previousClientMessageId } = sendMessageSchema.parse(req.body);
 
-    const message = await sendMessage(conversationId, senderId, content, replyToId, clientMessageId);
+    const message = await sendMessage(
+        conversationId,
+        senderId,
+        content,
+        replyToId,
+        clientMessageId,
+        previousClientMessageId,
+    );
 
     return res.status(201).json({
         message,
@@ -59,7 +66,7 @@ export const removeMessage = async (req: Request<{ messageId: string }>, res: Re
     const userId = res.locals.userId;
     const messageId = req.params.messageId;
 
-    await deleteMessage(messageId, userId);
+    const deletion = await deleteMessage(messageId, userId);
 
-    return res.status(204).send();
+    return res.status(200).json(deletion);
 };

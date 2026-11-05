@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "../components/messenger/ChatPanel";
 import { ConnectionStatus } from "../components/messenger/ConnectionStatus";
@@ -26,7 +26,11 @@ export const MessengerPage = () => {
         loading,
         error,
         refreshError,
-        requestConversationsReload,
+        requestRetry: conversationsRetry,
+        retryConversations,
+        handleConversationRead,
+        handleLocalConversationRead,
+        handleConversationReadReceipt,
         handleConversationMessage,
         handleConversationMessageDeleted,
     } = useConversations({
@@ -41,8 +45,17 @@ export const MessengerPage = () => {
     // Данные сообщений из хука
     const {
         messages,
+        hasOlderMessages,
+        isLatestHistoryLoaded,
+        isScrollToLatestButtonVisible,
+        isLoadingLatest,
+        scrollToLatestMessages,
         messagesLoading,
         messagesError,
+        initialRetry,
+        historySyncRetry,
+        paginationRetry,
+        retryInitialMessages,
         historySyncError,
         requestHistorySync,
         isLoadingOlder,
@@ -75,6 +88,11 @@ export const MessengerPage = () => {
         isEnabled: isAuthenticated && !messagesLoading && !messagesError,
     });
 
+    // Увиденную позицию показываем прочитанной до следующей отрисовки; сервер сохраняет её отдельно.
+    useLayoutEffect(() => {
+        handleLocalConversationRead(lastVisibleMessage, messages, isLatestHistoryLoaded);
+    }, [lastVisibleMessage, messages, isLatestHistoryLoaded, handleLocalConversationRead]);
+
     // ------- СОХРАНЕНИЕ ПРОЧТЕНИЯ ЧЕРЕЗ REST -------
     const { resumeReadPositionSync } = useConversationRead({
         conversationId: selectedConversation?.id ?? null,
@@ -82,6 +100,7 @@ export const MessengerPage = () => {
         lastVisibleMessage,
         initialReadState: selectedConversation?.readState ?? null,
         authenticatedRequest,
+        onReadPositionSaved: handleConversationRead,
         isEnabled: isAuthenticated,
     });
 
@@ -92,7 +111,7 @@ export const MessengerPage = () => {
     const onMessageCreated = useCallback(
         (message: Message) => {
             handleMessageCreated(message); // обновл. историю
-            handleConversationMessage(message); // обновл. sidebar
+            handleConversationMessage(message, "created"); // одновременно обновл. preview и счётчик sidebar
         },
         [handleMessageCreated, handleConversationMessage],
     );
@@ -103,12 +122,12 @@ export const MessengerPage = () => {
     const onMessageUpdated = useCallback(
         (message: Message) => {
             handleMessageUpdated(message);
-            handleConversationMessage(message);
+            handleConversationMessage(message, "updated");
         },
         [handleMessageUpdated, handleConversationMessage],
     );
 
-    // Получает id удалённого сообщения и его чата из socket.
+    // Получает id удалённого сообщения, его чат и новый preview из socket.
     // Передаёт удаление в историю и в обработчик списка диалогов.
     // Убирает сообщение из чата и обновляет последний текст sidebar.
     const onMessageDeleted = useCallback(
@@ -119,15 +138,29 @@ export const MessengerPage = () => {
         [handleMessageDeleted, handleConversationMessageDeleted],
     );
 
+    // Получает id сообщения из подтверждения удаления.
+    // Удаляет его через message hook и передаёт результат DELETE в sidebar даже без socket.
+    // Обновляет preview тем же обработчиком, который принимает socket-событие; повторы пропускаются.
+    const deleteMessageAndUpdateConversationPreview = async (messageId: string) => {
+        const deletion = await deleteMessage(messageId);
+        if (deletion) handleConversationMessageDeleted(deletion);
+    };
+
     // ------- СИНХРОНИЗАЦИЯ ПОСЛЕ CONNECT / RECONNECT -------
     // Получает сигнал об успешном подключении socket.
     // Запрашивает актуальную историю открытого чата и список диалогов.
     // Обновляет сообщения и sidebar, возобновляет очередь прочтения после connect/reconnect.
     const onConnected = useCallback(() => {
         requestHistorySync(); // сверка истории открытого чата
-        requestConversationsReload(); // обновление списка диалогов
+        retryConversations(); // обновление списка диалогов, в том числе после исчерпания retry
         resumeReadPositionSync(); // сохраняем позиции, накопленные без связи, включая закрытые чаты
-    }, [requestHistorySync, requestConversationsReload, resumeReadPositionSync]);
+    }, [requestHistorySync, retryConversations, resumeReadPositionSync]);
+
+    // После реального online возобновляем загрузки, даже если socket пока не подключился.
+    useEffect(() => {
+        window.addEventListener("online", onConnected);
+        return () => window.removeEventListener("online", onConnected);
+    }, [onConnected]);
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     // дальше эти данные передадим в ChatPannel
@@ -142,6 +175,8 @@ export const MessengerPage = () => {
             onMessageCreated, // socket получает событие, message hook обновляет messages
             onMessageUpdated,
             onMessageDeleted,
+            onConversationRead: handleConversationRead,
+            onConversationReadReceipt: handleConversationReadReceipt,
             onConnected,
         });
     const isOffline = connectionStatus === "offline";
@@ -214,9 +249,11 @@ export const MessengerPage = () => {
                 conversations={conversations}
                 presenceByUserId={presenceByUserId}
                 loading={loading || (isOffline && Boolean(error))}
+                isOffline={isOffline}
                 error={error}
                 refreshError={isOffline ? null : refreshError}
-                onRetryConversations={requestConversationsReload}
+                requestRetry={conversationsRetry}
+                onRetryConversations={retryConversations}
                 selectedConversationId={selectedConversationId}
                 onSelectConversation={handleSelectConversation}
             />
@@ -226,8 +263,13 @@ export const MessengerPage = () => {
                 key={selectedConversation?.id ?? "no-conversation"}
                 conversation={selectedConversation}
                 messages={messages}
+                hasOlderMessages={hasOlderMessages}
                 messagesLoading={messagesLoading}
                 messagesError={messagesError}
+                initialRetry={initialRetry}
+                historySyncRetry={historySyncRetry}
+                paginationRetry={paginationRetry}
+                onRetryInitialMessages={retryInitialMessages}
                 historySyncError={historySyncError}
                 onRetryHistorySync={requestHistorySync}
                 isOffline={isOffline}
@@ -235,9 +277,12 @@ export const MessengerPage = () => {
                 onSendMessage={sendMessage}
                 onRetryMessage={retryMessage}
                 onEditMessage={editMessage}
-                onDeleteMessage={deleteMessage}
+                onDeleteMessage={deleteMessageAndUpdateConversationPreview}
                 messagesContainerRef={messagesContainerRef}
                 onMessagesScroll={handleMessagesScroll}
+                isScrollToLatestButtonVisible={isScrollToLatestButtonVisible}
+                isLoadingLatest={isLoadingLatest}
+                onScrollToLatest={scrollToLatestMessages}
                 isLoadingOlder={isLoadingOlder}
                 isLoadingNewer={isLoadingNewer}
                 olderMessagesError={olderMessagesError}

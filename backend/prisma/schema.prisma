@@ -2,6 +2,8 @@ generator client {
   provider            = "prisma-client"
   output              = "../src/generated/prisma"
   importFileExtension = "js"
+  // Связанные данные можно получать через JOIN вместо отдельных запросов к БД.
+  previewFeatures     = ["relationJoins"]
 }
 
 datasource db {

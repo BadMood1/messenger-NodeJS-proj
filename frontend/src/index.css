@@ -53,7 +53,8 @@
 
 /* На touch даём обратную связь при удержании кнопок и сообщений. */
 @media (pointer: coarse) {
-    button:not(:disabled),
+    /* У кнопки перехода вниз свой transition для выезда и нажатия. */
+    button:not(:disabled):not(.flux-scroll-to-latest),
     .flux-message-placeholder {
         scale: 1;
         transition: scale 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;

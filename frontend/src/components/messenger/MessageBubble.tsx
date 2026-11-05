@@ -1,4 +1,4 @@
-import { CircleAlert, CheckCheck, Clock3, CornerUpLeft, Pencil, RotateCcw, SquareCheck, Trash2 } from "lucide-react";
+import { CircleAlert, Check, CheckCheck, Clock3, CornerUpLeft, Pencil, RotateCcw, SquareCheck, Trash2 } from "lucide-react";
 import { useRef } from "react";
 
 import type { Message, ClientMessage } from "../../features/messages/messages.api";
@@ -7,6 +7,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 type MessageBubbleProps = {
     message: ClientMessage;
     isOwnMessage: boolean;
+    isRead: boolean;
     actionsDisabled: boolean;
     onEdit: (message: Message) => void;
     onDelete: (message: Message) => void;
@@ -32,6 +33,7 @@ const formatMessageTime = (createdAt: string) => {
 export const MessageBubble = ({
     message,
     isOwnMessage,
+    isRead,
     actionsDisabled,
     onEdit,
     onDelete,
@@ -77,8 +79,10 @@ export const MessageBubble = ({
                                 ) : (
                                     <CircleAlert size={14} className="text-rose-500 dark:text-rose-400" aria-label="Failed to send" />
                                 )
-                            ) : (
+                            ) : isRead ? (
                                 <CheckCheck size={16} strokeWidth={2} aria-label="Read" />
+                            ) : (
+                                <Check size={16} strokeWidth={2} aria-label="Sent" />
                             ))}
                     </span>
                 </div>

@@ -1,5 +1,6 @@
 import { API_URL } from "../../lib/config";
-import { ApiRequestError } from "../../lib/api-request-error";
+import { createApiRequestError } from "../../lib/api-request-error";
+import { runRequestAttempt } from "../../lib/request-retry";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 
 export type ConversationUser = {
@@ -24,7 +25,10 @@ export type Conversation = {
     updatedAt: string;
     user: ConversationUser | null;
     lastMessage: ConversationLastMessage | null;
-    readState: ConversationReadState;
+    readState: ConversationReadState; // до какого сообщ. backend подтвердил прочтение
+    peerReadState: ConversationReadState | null; // прочтение собеседника
+    unreadCount: number;
+    localRead?: LocalConversationRead; // до какого сообщ. я дошёл на экране
 };
 
 export type ConversationReadState = {
@@ -34,12 +38,21 @@ export type ConversationReadState = {
     lastReadMessageCreatedAt: string | null;
 };
 
+// Только клиентские данные: увиденная граница и известное окно истории до подтверждения PATCH.
+export type LocalConversationRead = {
+    readState: ConversationReadState;
+    messages: Array<Pick<ConversationLastMessage, "id" | "createdAt" | "senderId"> & { isDeleted?: boolean }>;
+    latestLoadedMessage: ConversationLastMessage | null;
+};
+
 type ConversationsResponse = {
     conversations: Conversation[];
 };
 
-type MarkConversationReadResponse = {
+export type ConversationReadResult = {
     readState: ConversationReadState;
+    unreadCount: number;
+    lastMessage: ConversationLastMessage | null;
 };
 
 type GetConversationsOptions = {
@@ -57,61 +70,40 @@ export const getConversations = async (
     authenticatedRequest: AuthenticatedRequest,
     { signal }: GetConversationsOptions = {},
 ) => {
-    const response = await authenticatedRequest(`${API_URL}/conversations`, {
-        signal, // нужен для отмены запроса при смене токена или уходе со страницы
-    });
-
-    if (!response.ok) {
-        let message = "Failed to load conversations";
-
-        try {
-            // пробуем прочитать поле error из JSON, который вернул backend
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию
-        }
-
-        throw new ApiRequestError(message, response.status);
-    }
-
-    const data = (await response.json()) as ConversationsResponse;
-
-    return data.conversations;
+    return runRequestAttempt(
+        async (requestSignal) => {
+            const response = await authenticatedRequest(`${API_URL}/conversations`, {
+                signal: requestSignal,
+            });
+            if (!response.ok) throw await createApiRequestError(response, "Failed to load conversations");
+            const data = (await response.json()) as ConversationsResponse;
+            return data.conversations;
+        },
+        { signal },
+    );
 };
 
 // Получает id чата, id последнего прочитанного сообщения и функцию авторизованных запросов.
 // Отправляет PATCH с messageId; signal позволяет отменить запрос.
-// Возвращает сохранённую backend границу прочтения или выбрасывает ошибку запроса.
+// Возвращает границу, счётчик и последнее сообщение для прямого обновления sidebar.
 export const markConversationRead = async (
     conversationId: string,
     messageId: string,
     authenticatedRequest: AuthenticatedRequest,
     { signal }: MarkConversationReadOptions = {},
-): Promise<ConversationReadState> => {
-    const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/read`, {
-        method: "PATCH",
-        headers: {
-            "Content-Type": "application/json",
+): Promise<ConversationReadResult> => {
+    return runRequestAttempt(
+        async (requestSignal) => {
+            const response = await authenticatedRequest(`${API_URL}/conversations/${conversationId}/read`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messageId }),
+                signal: requestSignal,
+            });
+            if (!response.ok)
+                throw await createApiRequestError(response, "Failed to mark conversation as read");
+            return (await response.json()) as ConversationReadResult;
         },
-        body: JSON.stringify({ messageId }),
-        signal,
-    });
-
-    if (!response.ok) {
-        let message = "Failed to mark conversation as read";
-
-        try {
-            const body = (await response.json()) as { error?: string };
-            message = body.error ?? message;
-        } catch {
-            // Если ответ не JSON, оставляем текст ошибки по умолчанию.
-        }
-
-        throw new ApiRequestError(message, response.status);
-    }
-
-    const data = (await response.json()) as MarkConversationReadResponse;
-
-    return data.readState;
+        { signal, timeoutMs: 10_000 },
+    );
 };

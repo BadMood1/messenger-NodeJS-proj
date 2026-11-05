@@ -70,6 +70,9 @@ export const getDirectConversations = async (userId: string) => {
         async (tx) => {
             // Берём только DIRECT-чаты, где состоит текущий пользователь.
             const conversations = await tx.conversation.findMany({
+                // JOIN загружает участников и preview вместе с диалогами(объед. в 1 sql-запрос)
+                // take: 1 применяется в БД, поэтому всю переписку для preview не читаем.
+                relationLoadStrategy: "join",
                 where: {
                     type: "DIRECT",
 
@@ -156,6 +159,15 @@ export const getDirectConversations = async (userId: string) => {
                 lastReadMessageId: readSummary.lastReadMessageId,
                 lastReadMessageCreatedAt: readSummary.lastReadMessageCreatedAt,
             },
+            // Граница собеседника нужна для галочек после первой загрузки и reconnect.
+            peerReadState: otherMember
+                ? {
+                      conversationId: conversation.id,
+                      userId: otherMember.userId,
+                      lastReadMessageId: otherMember.lastReadMessageId,
+                      lastReadMessageCreatedAt: otherMember.lastReadMessageCreatedAt,
+                  }
+                : null,
             unreadCount: readSummary.unreadCount,
             firstUnreadMessageId: readSummary.firstUnreadMessageId,
         };

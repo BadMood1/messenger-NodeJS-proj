@@ -1,4 +1,5 @@
 import type { ClientMessage, Message } from "./messages.api";
+import { sortMessagesForDisplay } from "./message-ordering";
 
 // REST-ответ и socket-событие проходят одинаковую замену, независимо от того, что пришло первым.
 // добавл. серверное сообщение без дублей (в messagesBeforeMerge и возвр. дальше)
@@ -15,9 +16,21 @@ export const mergeMessage = (
         existingMessage && Date.parse(existingMessage.updatedAt) > Date.parse(receivedMessage.updatedAt)
             ? existingMessage
             : receivedMessage;
+    // Ищем локальную позицию заменяемого сообщения, включая уже подтверждённое через socket.
+    const localDisplayOrder = messagesBeforeMerge.find(
+        (listedMessage) =>
+            listedMessage.localDisplayOrder !== undefined &&
+            (listedMessage.id === receivedMessage.id ||
+                (receivedMessage.clientMessageId &&
+                    listedMessage.clientMessageId === receivedMessage.clientMessageId &&
+                    listedMessage.senderId === receivedMessage.senderId)),
+    )?.localDisplayOrder;
+    // Серверные поля обновляем, а место локальной отправки сохраняем.
+    const messageWithDisplayOrder =
+        localDisplayOrder === undefined ? latestMessage : { ...latestMessage, localDisplayOrder };
     // Убираем элементы, которые заменяем
-    return messagesBeforeMerge
-        .filter(
+    return sortMessagesForDisplay(
+        messagesBeforeMerge.filter(
             (listedMessage) =>
                 listedMessage.id !== receivedMessage.id && // серверный дубль
                 !(
@@ -25,13 +38,8 @@ export const mergeMessage = (
                     listedMessage.clientMessageId === receivedMessage.clientMessageId &&
                     listedMessage.senderId === receivedMessage.senderId
                 ),
-        )
-        .concat(latestMessage) // убрали дубль и соответствующий temp, добавили одно серверное сообщение
-        .sort(
-            (firstMessage, secondMessage) =>
-                Date.parse(firstMessage.createdAt) - Date.parse(secondMessage.createdAt) ||
-                firstMessage.id.localeCompare(secondMessage.id),
-        ); // ставим на место по времени отправки
+        ).concat(messageWithDisplayOrder), // убрали дубль и соответствующий temp, добавили одно серверное сообщение
+    );
 };
 
 // собирает новый список: заменяет старую серверную историю перечитанной, но сохраняет локальные отправки и сообщения, поступившие во время GET.
@@ -40,18 +48,23 @@ export const reconcileMessageHistory = (
     reloadedMessages: Message[],
     serverIdsBeforeReload: ReadonlySet<string>,
 ): ClientMessage[] => {
+    const reloadedMessageIds = new Set(reloadedMessages.map((message) => message.id));
     // есть localStatus - локальное sending/failed или его id отсутств. в исходном наборе, значит сообщ. появилось во время сверки
+    // Если подтверждённая локальная отправка есть и в новой истории, сохраняем её позицию для mergeMessage.
     const messagesToKeep = messagesNow.filter(
-        (message) => message.localStatus || !serverIdsBeforeReload.has(message.id),
+        (message) =>
+            message.localStatus ||
+            !serverIdsBeforeReload.has(message.id) ||
+            (message.localDisplayOrder !== undefined && reloadedMessageIds.has(message.id)),
     );
 
     let mergedMessages = messagesToKeep;
-    // добавляем reloaded сообщения к сохранённым, убираем дубли и сортируем по времени отправки
+    // добавляем reloaded сообщения к сохранённым, убираем дубли и сохраняем порядок отображения
     for (const reloadedMessage of reloadedMessages) {
         mergedMessages = mergeMessage(mergedMessages, reloadedMessage); // по 1-му добавл. в mergedMessages
     }
 
-    return mergedMessages;
+    return sortMessagesForDisplay(mergedMessages);
 };
 
 // Получает текущий массив сообщений и набор удаленных id.Возвр. новые сообщения без удаленных и без цитат на удаленные

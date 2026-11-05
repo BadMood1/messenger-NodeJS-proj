@@ -1,10 +1,25 @@
 import { z } from "zod";
 
-export const sendMessageSchema = z.object({
-    content: z.string().trim().min(1, "Message cannot be empty").max(4000, "Message is too long"),
-    replyToId: z.string().uuid().optional(),
-    clientMessageId: z.string().uuid().optional(), // UUID с frontend; без него старые запросы тоже работают
-});
+export const sendMessageSchema = z
+    .object({
+        content: z.string().trim().min(1, "Message cannot be empty").max(4000, "Message is too long"),
+        replyToId: z.string().uuid().optional(),
+        clientMessageId: z.string().uuid().optional(), // UUID с frontend; без него старые запросы тоже работают
+        previousClientMessageId: z.string().uuid().optional(),
+    })
+    .superRefine((message, ctx) => {
+        // Зависимость должна ссылаться на другую отправку, у которой есть собственный clientMessageId.
+        if (
+            message.previousClientMessageId &&
+            (!message.clientMessageId || message.previousClientMessageId === message.clientMessageId)
+        ) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["previousClientMessageId"],
+                message: "Invalid previous message id",
+            });
+        }
+    });
 
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 
@@ -25,7 +40,7 @@ export const messageHistoryQuerySchema = z
 
         // Сколько сообщений грузим за один запрос
         // z.coerce.number() преобразует значение через Number(), а z.number() не принимает строку "123" как число
-        limit: z.coerce.number().int().min(1).max(50).default(30),
+        limit: z.coerce.number().int().min(1).max(50).default(50),
     })
     // Поля по отдельности могут проходить, но их сочетания неправильные
     // query - проверяемый объект с уже применёнными преобразованиями

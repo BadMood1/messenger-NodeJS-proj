@@ -55,6 +55,8 @@ const loadMessagePage = async (
     // Берём на 1 сообщение больше, чтобы понять, есть ли ещё сообщения в выбранную сторону.
     // Сам cursor второй раз не возвращаем: фильтр использует строгое сравнение.
     const messages = await tx.message.findMany({
+        // Сообщения, авторов и цитаты получаем одним SQL-запросом.
+        relationLoadStrategy: "join",
         where: { conversationId, ...positionFilter },
         orderBy: [{ createdAt: order }, { id: order }],
         take: limit + 1,
@@ -148,7 +150,7 @@ const loadUnreadMessageWindow = async (
 export const getMessages = async (
     conversationId: string,
     userId: string,
-    { cursor, cursorCreatedAt, direction = "older", mode = "latest", limit = 30 }: MessageHistoryOptions = {},
+    { cursor, cursorCreatedAt, direction = "older", mode = "latest", limit = 50 }: MessageHistoryOptions = {},
 ) => {
     // Границу, окно и наличие соседних страниц читаем из одного снимка БД.
     return prisma.$transaction(
@@ -209,7 +211,7 @@ export const getMessages = async (
             }
 
             // У обычной последней(снизу) страницы заведомо нет более новых сообщений в этом снимке.
-            // GET /api/conversations/:id/messages?limit=30 значит "дай последние 30"
+            // GET /api/conversations/:id/messages?limit=50 значит "дай последние 50"
             if (!cursorPosition) return buildMessageHistoryResponse(page.messages, page.hasMore, false);
 
             // При дозагрузке старых сообщений от cursor (direction = older):

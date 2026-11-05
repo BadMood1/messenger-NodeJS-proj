@@ -1,7 +1,9 @@
 import {
     ArrowLeft,
+    ArrowDown,
     Check,
     MessageCircleMore,
+    LoaderCircle,
     MoreHorizontal,
     Phone,
     Plus,
@@ -14,6 +16,9 @@ import {
 import { Fragment, useRef, useState, type FormEvent, type RefObject } from "react";
 
 import { MessageBubble } from "./MessageBubble";
+import { ChatScrollDate } from "./ChatScrollDate";
+import { RequestRetryStatus } from "./RequestRetryStatus";
+import type { RequestRetryState } from "../../lib/request-retry";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -24,13 +29,20 @@ import {
 } from "../ui/alert-dialog";
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { Message, ClientMessage } from "../../features/messages/messages.api";
+import { getMessageDateSeparatorLabel } from "../../features/messages/message-date-separators";
 import { formatLastSeen } from "../../features/realtime/format-last-seen";
+import { isMessageReadByPeer } from "../../features/conversations/conversation-read-receipts";
 
 type ChatPanelProps = {
     conversation: Conversation | null;
     messages: ClientMessage[];
+    hasOlderMessages: boolean;
     messagesLoading: boolean;
     messagesError: string | null;
+    initialRetry: RequestRetryState | null;
+    historySyncRetry: RequestRetryState | null;
+    paginationRetry: RequestRetryState | null;
+    onRetryInitialMessages: () => void;
     historySyncError: string | null;
     onRetryHistorySync: () => void;
     isOffline: boolean;
@@ -41,6 +53,9 @@ type ChatPanelProps = {
     onDeleteMessage: (messageId: string) => Promise<void>;
     messagesContainerRef: RefObject<HTMLDivElement | null>;
     onMessagesScroll: () => void;
+    isScrollToLatestButtonVisible: boolean;
+    isLoadingLatest: boolean;
+    onScrollToLatest: () => void;
     isLoadingOlder: boolean;
     isLoadingNewer: boolean;
     olderMessagesError: string | null;
@@ -67,8 +82,13 @@ const getInitials = (name: string) => {
 export const ChatPanel = ({
     conversation,
     messages,
+    hasOlderMessages,
     messagesLoading,
     messagesError,
+    initialRetry,
+    historySyncRetry,
+    paginationRetry,
+    onRetryInitialMessages,
     historySyncError,
     onRetryHistorySync,
     isOffline,
@@ -79,6 +99,9 @@ export const ChatPanel = ({
     onDeleteMessage,
     messagesContainerRef,
     onMessagesScroll,
+    isScrollToLatestButtonVisible,
+    isLoadingLatest,
+    onScrollToLatest,
     isLoadingOlder,
     isLoadingNewer,
     olderMessagesError,
@@ -238,41 +261,70 @@ export const ChatPanel = ({
     let statusText = `@${conversationUser.username}`;
     if (isPeerOnline !== null) statusText = isPeerOnline ? "Online" : formatLastSeen(peerLastSeenAt);
     if (isPeerTyping) statusText = "печатает…";
+    const currentDate = new Date();
 
     return (
-        <section className="flux-chat-panel" onKeyDown={(event) => {
-            // Escape сначала отменяет Reply, но меню и модалка обрабатывают его сами.
-            if (event.key === "Escape" && replyingMessage && !event.defaultPrevented &&
-                !(event.target instanceof Element && event.target.closest('[role="menu"], [role="alertdialog"]'))) {
-                event.preventDefault();
-                event.stopPropagation();
-                cancelReply();
-            }
-        }}>
+        <section
+            className="flux-chat-panel"
+            onKeyDown={(event) => {
+                // Escape сначала отменяет Reply, но меню и модалка обрабатывают его сами.
+                if (
+                    event.key === "Escape" &&
+                    replyingMessage &&
+                    !event.defaultPrevented &&
+                    !(
+                        event.target instanceof Element &&
+                        event.target.closest('[role="menu"], [role="alertdialog"]')
+                    )
+                ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    cancelReply();
+                }
+            }}
+        >
             <header className="flux-chat-header">
                 <div className="flex items-center gap-3 max-lg:min-w-0 max-lg:gap-2">
-                    <button type="button" className="flux-icon-button lg:hidden" aria-label="Back to conversations" onClick={onBack}>
+                    <button
+                        type="button"
+                        className="flux-icon-button lg:hidden"
+                        aria-label="Back to conversations"
+                        onClick={onBack}
+                    >
                         <ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" />
                     </button>
                     <div className="relative shrink-0">
                         <div className="flux-chat-avatar overflow-hidden">
                             {conversationUser.image ? (
-                                <img src={conversationUser.image} alt="" className="h-full w-full object-cover" />
+                                <img
+                                    src={conversationUser.image}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                />
                             ) : (
                                 getInitials(conversationUser.name) || "?"
                             )}
                         </div>
                         {/* Показываем кружок только при подтверждённом online; null — статус ещё неизвестен. */}
                         {/* Оставляем элемент в DOM, чтобы opacity плавно менялась и при появлении, и при исчезновении. */}
-                        <span className="flux-presence-dot" data-online={isPeerOnline === true} aria-hidden="true" />
+                        <span
+                            className="flux-presence-dot"
+                            data-online={isPeerOnline === true}
+                            aria-hidden="true"
+                        />
                     </div>
                     <div className="max-lg:min-w-0">
                         <h2 className="text-base font-semibold leading-5 text-slate-900 dark:text-slate-50 max-lg:truncate">
                             {conversationUser.name}
                         </h2>
-                        <p aria-live="polite" className={`mt-0.5 text-xs max-lg:truncate ${
-                            isPeerTyping || isPeerOnline === true ? "text-blue-600 dark:text-cyan-300" : "text-slate-500 dark:text-slate-400"
-                        }`}>
+                        <p
+                            aria-live="polite"
+                            className={`mt-0.5 text-xs max-lg:truncate ${
+                                isPeerTyping || isPeerOnline === true
+                                    ? "text-blue-600 dark:text-cyan-300"
+                                    : "text-slate-500 dark:text-slate-400"
+                            }`}
+                        >
                             {statusText}
                         </p>
                     </div>
@@ -294,74 +346,173 @@ export const ChatPanel = ({
                 </div>
             </header>
 
-            <div ref={messagesContainerRef} className="flux-chat-messages" onScroll={onMessagesScroll}>
-                {messagesLoading ? (
-                    <div className="flux-chat-content-state" role="status">
-                        {isOffline ? "Waiting for a connection..." : "Loading messages..."}
-                    </div>
-                ) : messagesError ? (
-                    <div className={`flux-chat-content-state${isOffline ? "" : " text-rose-600 dark:text-rose-300"}`}
-                        role={isOffline ? "status" : "alert"}>
-                        {isOffline ? "Waiting for a connection..." : messagesError}
-                    </div>
-                ) : messages.length === 0 ? (
-                    <div className="flux-chat-content-state">No messages yet</div>
-                ) : (
-                    <div className="flux-message-stack">
-                        {isLoadingOlder && <div className="flux-load-older" role="status">Loading older messages...</div>}
-                        {!isOffline && olderMessagesError && (
-                            <div className="flux-load-older-error" role="alert">
-                                {olderMessagesError}
-                                <button type="button" onClick={onRetryHistoryPage}
-                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
-                                    Retry
-                                </button>
-                            </div>
-                        )}
-                        {messages.map((message) => (
-                            <Fragment key={message.id}>
-                                {message.id === firstUnreadMessageId && (
-                                    <div className="flux-message-day" data-unread-separator role="separator" aria-label="Unread messages">
-                                        <span>Unread messages</span>
-                                    </div>
-                                )}
-                                <MessageBubble
-                                    message={message}
-                                    isOwnMessage={message.senderId === currentUserId}
-                                    actionsDisabled={isSubmitting || isDeleting}
-                                    onEdit={startEditing}
-                                    onDelete={confirmDelete}
-                                    onReply={startReply}
-                                    onRetry={onRetryMessage}
+            <div className="flux-chat-history">
+                <div ref={messagesContainerRef} className="flux-chat-messages" onScroll={onMessagesScroll}>
+                    {messagesLoading ? (
+                        <div className="flux-chat-content-state" role={initialRetry ? undefined : "status"}>
+                            {initialRetry ? (
+                                <RequestRetryStatus retry={initialRetry} onRetry={onRetryInitialMessages} />
+                            ) : isOffline ? (
+                                "Waiting for a connection..."
+                            ) : (
+                                "Loading messages..."
+                            )}
+                        </div>
+                    ) : messagesError ? (
+                        <div
+                            className={`flux-chat-content-state${isOffline ? "" : " text-rose-600 dark:text-rose-300"}`}
+                            role={isOffline ? "status" : undefined}
+                        >
+                            {isOffline ? (
+                                "Waiting for a connection..."
+                            ) : (
+                                <RequestRetryStatus
+                                    retry={null}
+                                    error={messagesError}
+                                    onRetry={onRetryInitialMessages}
                                 />
-                            </Fragment>
-                        ))}
-                        {isLoadingNewer && (
-                            <div className="self-center py-1 text-xs text-slate-500 dark:text-slate-400" role="status">
-                                Loading newer messages...
-                            </div>
-                        )}
-                        {!isOffline && newerMessagesError && (
-                            <div className="self-center py-1 text-xs text-rose-600 dark:text-rose-300" role="alert">
-                                {newerMessagesError}
-                                <button type="button" onClick={onRetryHistoryPage}
-                                    className="ml-2 cursor-pointer rounded px-1 font-semibold transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
-                                    Retry
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                            )}
+                        </div>
+                    ) : messages.length === 0 ? (
+                        <div className="flux-chat-content-state">No messages yet</div>
+                    ) : (
+                        <div className="flux-message-stack">
+                            {isLoadingOlder && !paginationRetry && (
+                                <div className="flux-load-older" role="status">
+                                    Loading older messages...
+                                </div>
+                            )}
+                            {!isOffline && ((isLoadingOlder && paginationRetry) || olderMessagesError) && (
+                                <div className="flux-load-older flux-load-older-retry">
+                                    <RequestRetryStatus
+                                        retry={isLoadingOlder ? paginationRetry : null}
+                                        error={olderMessagesError}
+                                        onRetry={onRetryHistoryPage}
+                                    />
+                                </div>
+                            )}
+                            {messages.map((message, index) => {
+                                // Если выше ещё есть история, первое загруженное сообщение не считаем началом дня.
+                                const dateSeparatorLabel =
+                                    index === 0 && hasOlderMessages
+                                        ? null
+                                        : getMessageDateSeparatorLabel(
+                                              message.createdAt,
+                                              messages[index - 1]?.createdAt,
+                                              currentDate,
+                                          );
+                                // clientMessageId сохраняет тот же bubble после замены temp id на server id.
+                                return (
+                                    <Fragment
+                                        key={message.clientMessageId
+                                            ? `client:${message.senderId}:${message.clientMessageId}`
+                                            : message.id}
+                                    >
+                                        {dateSeparatorLabel && (
+                                            <div
+                                                className="flux-message-day"
+                                                data-date-separator
+                                                role="separator"
+                                                aria-label={dateSeparatorLabel}
+                                            >
+                                                <span>{dateSeparatorLabel}</span>
+                                            </div>
+                                        )}
+                                        {message.id === firstUnreadMessageId && (
+                                            <div
+                                                className="flux-message-day"
+                                                data-unread-separator
+                                                role="separator"
+                                                aria-label="Unread messages"
+                                            >
+                                                <span>Unread messages</span>
+                                            </div>
+                                        )}
+                                        <MessageBubble
+                                            message={message}
+                                            isOwnMessage={message.senderId === currentUserId}
+                                            isRead={isMessageReadByPeer(message, conversation.peerReadState)}
+                                            actionsDisabled={isSubmitting || isDeleting}
+                                            onEdit={startEditing}
+                                            onDelete={confirmDelete}
+                                            onReply={startReply}
+                                            onRetry={onRetryMessage}
+                                        />
+                                    </Fragment>
+                                );
+                            })}
+                            {isLoadingNewer && !isLoadingLatest && !paginationRetry && (
+                                <div
+                                    className="self-center py-1 text-xs text-slate-500 dark:text-slate-400"
+                                    role="status"
+                                >
+                                    Loading newer messages...
+                                </div>
+                            )}
+                            {!isOffline && ((isLoadingNewer && paginationRetry) || newerMessagesError) && (
+                                <div className="self-center">
+                                    <RequestRetryStatus
+                                        retry={isLoadingNewer ? paginationRetry : null}
+                                        error={newerMessagesError}
+                                        onRetry={onRetryHistoryPage}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {/* Пока верх занят загрузкой или ошибкой, плавающую дату не выводим. */}
+                {!isLoadingOlder && !olderMessagesError && (
+                    <ChatScrollDate
+                        messages={messages}
+                        messagesContainerRef={messagesContainerRef}
+                        isEnabled={isScrollToLatestButtonVisible}
+                    />
                 )}
+                {/* Оставляем кнопку в DOM: и появление, и уход под composer проходят плавно. */}
+                <button
+                    type="button"
+                    className="flux-scroll-to-latest"
+                    data-visible={isScrollToLatestButtonVisible}
+                    tabIndex={isScrollToLatestButtonVisible ? 0 : -1}
+                    aria-hidden={!isScrollToLatestButtonVisible}
+                    aria-label={
+                        isLoadingLatest
+                            ? "Loading latest messages"
+                            : `Go to latest messages${conversation.unreadCount > 0 ? `, ${conversation.unreadCount} unread messages` : ""}`
+                    }
+                    aria-busy={isLoadingLatest}
+                    disabled={isLoadingLatest || !isScrollToLatestButtonVisible}
+                    onClick={onScrollToLatest}
+                >
+                    {conversation.unreadCount > 0 && (
+                        <span
+                            className="flux-conversation-unread absolute -top-2.5 right-0"
+                            aria-hidden="true"
+                        >
+                            {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+                        </span>
+                    )}
+                    {isLoadingLatest ? (
+                        <LoaderCircle
+                            size={20}
+                            className="animate-spin motion-reduce:animate-none"
+                            aria-hidden="true"
+                        />
+                    ) : (
+                        <ArrowDown size={20} strokeWidth={1.8} aria-hidden="true" />
+                    )}
+                </button>
             </div>
 
             <footer className="shrink-0 border-t border-slate-200/60 p-3.5 dark:border-white/8 lg:p-4">
-                {!isOffline && historySyncError && (
-                    <div className="mb-2 flex items-center justify-between gap-3 text-xs text-rose-600 dark:text-rose-300" role="alert">
-                        <span className="min-w-0">{historySyncError}</span>
-                        <button type="button" onClick={onRetryHistorySync}
-                            className="shrink-0 cursor-pointer rounded-md px-2 py-1 font-medium transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
-                            Retry
-                        </button>
+                {!isOffline && (historySyncRetry || historySyncError) && (
+                    <div className="mb-2">
+                        <RequestRetryStatus
+                            retry={historySyncRetry}
+                            error={historySyncError}
+                            onRetry={onRetryHistorySync}
+                        />
                     </div>
                 )}
                 {replyingMessage && (
@@ -372,8 +523,13 @@ export const ChatPanel = ({
                             </span>
                             <span className="block truncate opacity-80">{replyingMessage.content}</span>
                         </blockquote>
-                        <button type="button" className="flux-icon-button" aria-label="Cancel reply"
-                            disabled={isSubmitting} onClick={cancelReply}>
+                        <button
+                            type="button"
+                            className="flux-icon-button"
+                            aria-label="Cancel reply"
+                            disabled={isSubmitting}
+                            onClick={cancelReply}
+                        >
                             <X size={16} aria-hidden="true" />
                         </button>
                     </div>
@@ -424,7 +580,9 @@ export const ChatPanel = ({
                         type="submit"
                         className="flux-composer-send cursor-pointer"
                         aria-label={editingMessage ? "Save message" : "Send message"}
-                        disabled={isSubmitting || messagesLoading || Boolean(messagesError) || !content.trim()}
+                        disabled={
+                            isSubmitting || messagesLoading || Boolean(messagesError) || !content.trim()
+                        }
                     >
                         {editingMessage ? (
                             <Check size={18} strokeWidth={2} aria-hidden="true" />

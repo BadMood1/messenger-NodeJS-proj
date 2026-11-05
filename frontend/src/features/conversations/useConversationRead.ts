@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { ApiRequestError, isTemporaryRequestError } from "../../lib/api-request-error";
+import { getRequestRetryDelay } from "../../lib/request-retry";
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
-import { markConversationRead, type ConversationReadState } from "./conversations.api";
+import { markConversationRead, type ConversationReadState, type ConversationReadResult } from "./conversations.api";
 
 // ------- КАК СОХРАНЯЕТСЯ ПРОЧТЕНИЕ -------
 // 1. useLastVisibleMessage определяет видимую позицию; MessengerPage передаёт её в этот хук.
@@ -16,19 +17,20 @@ import { markConversationRead, type ConversationReadState } from "./conversation
 // 5. markConversationRead получает conversationId и positionToSend.messageId;
 //    через authenticatedRequest отправляет PATCH /conversations/:conversationId/read.
 // 6. Backend возвращает readState -> сохраняем его в confirmedPosition и убираем покрытую позицию.
+//    onReadPositionSaved передаёт готовый результат для обновления sidebar без GET.
 //    В finally снова вызываем scheduleRead: если накопилась новая позиция, сохраняем и её.
-// Сетевой сбой или временный HTTP-отказ -> повтор через 2/4/8/16/30 с, без ошибки возле composer.
+// Временный сбой -> ограниченные повторы по общей политике request-retry, без ошибки возле composer.
+// После лимита позиция остаётся в очереди; online/reconnect разрешает одну проверочную попытку.
 // Offline приостанавливает отправку; online/reconnect возобновляет её. Смена чата очередь не очищает.
 
 const READ_INTERVAL_MS = 2000;
-const MAX_RETRY_DELAY_MS = 30_000;
-const READ_REQUEST_TIMEOUT_MS = 10_000;
 
 type ReadPosition = { messageId: string | null; createdAt: string };
 type ConversationReadProgress = {
     pendingPosition: VisibleMessagePosition | null;
     confirmedPosition: ReadPosition | null;
-    retryAttempt: number; // кол-во последовательных временных ошибок
+    failedAttempts: number; // кол-во последовательных временных ошибок
+    isRetryExhausted: boolean; // попытки исчерпаны; позицию сохраняем до восстановления связи
     requestAllowedAt: number; // время, начиная с которого разрешён запрос прочтения этого чата
     rejectedMessageId: string | null; // id, который сервер окончательно отклонил
     isAccessDenied: boolean; // сервер отказал в доступе к этому чату
@@ -40,6 +42,7 @@ type UseConversationReadOptions = {
     lastVisibleMessage: VisibleMessagePosition | null;
     initialReadState: ConversationReadState | null;
     authenticatedRequest: AuthenticatedRequest;
+    onReadPositionSaved: (result: ConversationReadResult) => void;
     isEnabled: boolean;
 };
 
@@ -111,7 +114,8 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
                 progress = {
                     pendingPosition: null,
                     confirmedPosition: null,
-                    retryAttempt: 0,
+                    failedAttempts: 0,
+                    isRetryExhausted: false,
                     requestAllowedAt: 0,
                     rejectedMessageId: null,
                     isAccessDenied: false,
@@ -134,6 +138,8 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
             // Проверяем и обновляем подтвержденную границу
             if (isMessageAfterPosition(savedPosition, progress.confirmedPosition)) {
                 progress.confirmedPosition = savedPosition;
+                progress.failedAttempts = 0;
+                progress.isRetryExhausted = false;
             }
             // Если backend подтвердил прочтение до ожидающей позиции или дальше,
             // убираем её из очереди: повторный PATCH для неё не нужен.
@@ -154,6 +160,7 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
             for (const [queuedConversationId, progress] of progressByConversationId) {
                 if (
                     !progress.isAccessDenied &&
+                    !progress.isRetryExhausted &&
                     progress.pendingPosition &&
                     (!nextConversation ||
                         progress.requestAllowedAt < nextConversation.progress.requestAllowedAt)
@@ -225,14 +232,9 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
             const controller = new AbortController();
             requestController = controller; // controller именно для конкретного запроса
             lastRequestStartedAt = Date.now();
-            // Зависший PATCH через 10 с освобождает очередь; его позицию затем повторим в фоне.
-            const requestTimeoutId = window.setTimeout(() => {
-                controller.abort(new DOMException("Read position request timed out", "TimeoutError"));
-            }, READ_REQUEST_TIMEOUT_MS);
-
             try {
                 // получаем сохр. backend границу
-                const readState = await markConversationRead(
+                const readResult = await markConversationRead(
                     queuedConversationId,
                     positionToSend.messageId,
                     authenticatedRequest,
@@ -242,24 +244,20 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
 
                 // Сохр. в Map
                 // Backend мог вернуть более новую границу от другой вкладки — используем его ответ, не отправленный id.
-                rememberConfirmedReadPosition(readState);
-                progress.retryAttempt = 0;
+                rememberConfirmedReadPosition(readResult.readState);
+                progress.failedAttempts = 0;
+                progress.isRetryExhausted = false;
                 progress.requestAllowedAt = Date.now(); // ожидания для этого чата нет, можно отправлять markConversationRead
+                // PATCH уже сохранён: обновляем счётчик, даже если socket сейчас отключён.
+                contextRef.current.onReadPositionSaved(readResult);
             } catch (error) {
-                // различаем обычную отмену и зависание
-                const didRequestTimeOut =
-                    controller.signal.reason instanceof DOMException &&
-                    controller.signal.reason.name === "TimeoutError";
-                if (!isReadSyncActive() || (controller.signal.aborted && !didRequestTimeOut)) return;
+                if (!isReadSyncActive() || controller.signal.aborted) return;
                 // При временной ошибке фоновый повтор
-                if (didRequestTimeOut || isTemporaryRequestError(error)) {
+                if (isTemporaryRequestError(error)) {
                     // Позиция остаётся в Map, в том числе если во время запроса увидели более новую.
-                    progress.retryAttempt = Math.min(progress.retryAttempt + 1, 5);
-                    const retryDelay = Math.min(
-                        READ_INTERVAL_MS * 2 ** (progress.retryAttempt - 1), // 2,4,8,16,30
-                        MAX_RETRY_DELAY_MS,
-                    );
-                    progress.requestAllowedAt = Date.now() + retryDelay;
+                    const retryDelay = getRequestRetryDelay(error, ++progress.failedAttempts);
+                    progress.isRetryExhausted = retryDelay === null;
+                    if (retryDelay !== null) progress.requestAllowedAt = Date.now() + retryDelay;
                 } else {
                     // Если доступ запрещён, прекращаем отправку всего чата, а не только одного messageId.
                     if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
@@ -284,7 +282,6 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
                     if (import.meta.env.DEV) console.debug("[read] Position was not saved:", error);
                 }
             } finally {
-                window.clearTimeout(requestTimeoutId);
                 // снимаем признак выполняющегося запроса, если ссылка все ещё относится к нашему controller
                 if (requestController === controller) requestController = null;
                 if (isReadSyncActive()) scheduleRead();
@@ -323,12 +320,12 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
 
         // ------- ВОССТАНОВЛЕНИЕ СВЯЗИ И АКТИВНОСТИ ВКЛАДКИ -------
         // Вызывается после browser online или успешного socket connect/reconnect.
-        // Разрешает повтор накопленных позиций без ожидания старой задержки ошибки.
+        // Разрешает проверочную попытку, сохраняя счётчик ошибок до успешного ответа.
         // Планирует один PATCH, сохраняя общий двухсекундный интервал.
         const resumeReadPositionSync = () => {
             if (!isReadSyncActive()) return;
             for (const progress of progressByConversationId.values()) {
-                progress.retryAttempt = 0;
+                progress.isRetryExhausted = false;
                 progress.requestAllowedAt = 0;
             }
             scheduleRead();
@@ -349,7 +346,6 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
         // --- НАЧИНАЕМ РАБОТУ ---
         const actions = { queueVisibleMessageForRead, resumeReadPositionSync };
         readActionsRef.current = actions;
-        window.addEventListener("online", resumeReadPositionSync);
         window.addEventListener("offline", handleReadSyncActivity);
         window.addEventListener("focus", handleReadSyncActivity);
         window.addEventListener("blur", handleReadSyncActivity);
@@ -361,7 +357,6 @@ export const useConversationRead = (options: UseConversationReadOptions) => {
             isReadSyncStopped = true;
             if (timerId !== null) window.clearTimeout(timerId);
             requestController?.abort();
-            window.removeEventListener("online", resumeReadPositionSync);
             window.removeEventListener("offline", handleReadSyncActivity);
             window.removeEventListener("focus", handleReadSyncActivity);
             window.removeEventListener("blur", handleReadSyncActivity);

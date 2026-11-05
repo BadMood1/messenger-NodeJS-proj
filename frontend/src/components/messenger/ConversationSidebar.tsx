@@ -1,14 +1,19 @@
 import { MessageCircleMore, Search, UserRound, UsersRound } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { Conversation } from "../../features/conversations/conversations.api";
 import type { UserPresence } from "../../features/realtime/useConversationPresence";
+import type { RequestRetryState } from "../../lib/request-retry";
+import { RequestRetryStatus } from "./RequestRetryStatus";
 
 type ConversationSidebarProps = {
     conversations: Conversation[];
     presenceByUserId: ReadonlyMap<string, UserPresence>;
     loading: boolean;
+    isOffline: boolean;
     error: string | null;
     refreshError: string | null;
+    requestRetry: RequestRetryState | null;
     onRetryConversations: () => void;
     selectedConversationId: string | null;
     onSelectConversation: (id: string) => void;
@@ -54,7 +59,7 @@ const formatConversationTime = (createdAt: string) => {
 
 // Получает диалог, признаки выбора и online, а также обработчик открытия чата.
 // Отображает одного собеседника из полученной conversation.
-// Возвращает кнопку с аватаром, последним сообщением и временем.
+// Возвращает кнопку с аватаром, последним сообщением, временем и счётчиком непрочитанных.
 const ConversationRow = ({
     conversation,
     selected,
@@ -69,6 +74,20 @@ const ConversationRow = ({
     const displayName = conversation.user?.name || conversation.user?.username || "Unknown user";
     const preview = conversation.lastMessage?.content ?? "No messages yet";
     const activityAt = conversation.lastMessage?.createdAt ?? conversation.createdAt;
+    const unreadCount = conversation.unreadCount;
+    const hasUnreadMessages = unreadCount > 0;
+    const [lastPositiveUnreadCount, setLastPositiveUnreadCount] = useState(unreadCount);
+    const displayedUnreadCount = hasUnreadMessages ? unreadCount : lastPositiveUnreadCount;
+
+    // Положительное число показываем прямо из conversation в том же рендере, что и preview.
+    // Последнее ненулевое число запоминаем только для анимации исчезновения при нуле.
+    useEffect(() => {
+        if (unreadCount <= 0) return;
+        const timerId = window.setTimeout(() => {
+            setLastPositiveUnreadCount(unreadCount);
+        }, 0);
+        return () => window.clearTimeout(timerId);
+    }, [unreadCount]);
 
     return (
         <button
@@ -101,9 +120,20 @@ const ConversationRow = ({
                     </time>
                 </div>
 
-                <p className="mt-0.5 truncate text-[13px] leading-4 text-slate-500 dark:text-slate-400">
-                    {preview}
-                </p>
+                <div className="mt-0.5 flex items-center">
+                    <p className="min-w-0 flex-1 truncate text-[13px] leading-4 text-slate-500 dark:text-slate-400">
+                        {preview}
+                    </p>
+                    <span className="flux-conversation-unread-slot" data-visible={hasUnreadMessages}
+                        aria-hidden={!hasUnreadMessages}>
+                        <span className="min-w-0 overflow-hidden">
+                            <span className="flux-conversation-unread">
+                                <span aria-hidden="true">{displayedUnreadCount > 99 ? "99+" : displayedUnreadCount}</span>
+                                <span className="sr-only">{displayedUnreadCount} unread messages</span>
+                            </span>
+                        </span>
+                    </span>
+                </div>
             </div>
         </button>
     );
@@ -113,8 +143,10 @@ export const ConversationSidebar = ({
     conversations,
     presenceByUserId,
     loading,
+    isOffline,
     error,
     refreshError,
+    requestRetry,
     onRetryConversations,
     selectedConversationId,
     onSelectConversation,
@@ -151,23 +183,16 @@ export const ConversationSidebar = ({
         </header>
 
         <div className="flux-conversation-list">
-            {refreshError && (
-                <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-rose-600 dark:text-rose-300" role="alert">
-                    <span className="min-w-0">{refreshError}</span>
-                    <button type="button" onClick={onRetryConversations}
-                        className="shrink-0 cursor-pointer rounded-md px-2 py-1 font-medium transition-colors duration-150 hover:bg-rose-500/10 active:bg-rose-500/15 motion-reduce:transition-none">
-                        Retry
-                    </button>
-                </div>
-            )}
+            {!loading && !isOffline && <RequestRetryStatus retry={requestRetry} error={refreshError} onRetry={onRetryConversations} />}
             {/* Показываем только одно состояние списка за раз. */}
             {loading ? (
-                <div className="flux-conversation-state" role="status">
-                    Loading conversations...
+                <div className="flux-conversation-state" role={requestRetry ? undefined : "status"}>
+                    {requestRetry ? <RequestRetryStatus retry={requestRetry} onRetry={onRetryConversations} /> :
+                        isOffline ? "Waiting for a connection..." : "Loading conversations..."}
                 </div>
             ) : error ? (
-                <div className="flux-conversation-state text-rose-600 dark:text-rose-300" role="alert">
-                    {error}
+                <div className="flux-conversation-state">
+                    <RequestRetryStatus retry={null} error={error} onRetry={onRetryConversations} />
                 </div>
             ) : conversations.length === 0 ? (
                 <div className="flux-conversation-state">No conversations yet</div>
