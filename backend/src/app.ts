@@ -8,7 +8,7 @@ import cookieParser from "cookie-parser";
 import { userRouter } from "./routes/user.routes.js";
 import { friendRouter } from "./routes/friend.routes.js";
 import { conversationRouter } from "./routes/conversation.routes.js";
-import { initializeSocketServer } from "./lib/socket.js";
+import { initializeSocketServer } from "./realtime/socket.js";
 
 const app = express();
 const FRONTEND_ORIGIN = "http://localhost:5173";

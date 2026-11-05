@@ -1,8 +1,8 @@
 import { CircleAlert, Check, CheckCheck, Clock3, CornerUpLeft, Pencil, RotateCcw, SquareCheck, Trash2 } from "lucide-react";
 import { useRef } from "react";
 
-import type { Message, ClientMessage } from "../../features/messages/messages.api";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui/context-menu";
+import type { Message, ClientMessage } from "../../../features/messages/messages.types";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../../ui/context-menu";
 
 type MessageBubbleProps = {
     message: ClientMessage;

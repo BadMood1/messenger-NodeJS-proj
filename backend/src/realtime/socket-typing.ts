@@ -1,7 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import { z } from "zod";
 
-import { prisma } from "./prisma.js";
+import { prisma } from "../lib/prisma.js";
 
 // ------- ДАННЫЕ TYPING -------
 const typingSchema = z.object({

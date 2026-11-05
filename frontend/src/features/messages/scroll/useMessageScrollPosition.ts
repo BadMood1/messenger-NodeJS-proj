@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import type { ClientMessage } from "./messages.api";
+import type { ClientMessage } from "../messages.types";
 
 // Только DOM и позиция скролла: сообщения и запросы остаются в useConversationMessages.
 export const useMessageScrollPosition = (messages: ClientMessage[]) => {

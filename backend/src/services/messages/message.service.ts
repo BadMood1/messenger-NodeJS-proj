@@ -1,9 +1,9 @@
-import { prisma } from "../lib/prisma.js";
-import { AppError } from "../errors/app-error.js";
-import { Prisma } from "../generated/prisma/client.js";
-import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../lib/socket.js";
-import { createMessageSendTiming } from "../lib/message-send-timing.js";
-import { messageInclude } from "../lib/message-include.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../errors/app-error.js";
+import { Prisma } from "../../generated/prisma/client.js";
+import { publishMessageCreated, publishMessageDeleted, publishMessageUpdated } from "../../realtime/socket.js";
+import { createMessageSendTiming } from "./message-send-timing.js";
+import { messageInclude } from "./message-include.js";
 import { rejectPendingMessageSend, sendMessageInOrder } from "./message-send-order.js";
 
 // Получает чат, автора, текст и необязательные id для Reply, Retry и порядка отправки.

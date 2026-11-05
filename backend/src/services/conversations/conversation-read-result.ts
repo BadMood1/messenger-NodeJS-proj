@@ -1,5 +1,5 @@
-import type { Prisma, ConversationMember } from "../generated/prisma/client.js";
-import { prisma } from "../lib/prisma.js";
+import type { Prisma, ConversationMember } from "../../generated/prisma/client.js";
+import { prisma } from "../../lib/prisma.js";
 
 type SavedReadState = Pick<
     ConversationMember,

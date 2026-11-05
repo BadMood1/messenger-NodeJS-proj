@@ -1,4 +1,4 @@
-import type { Conversation, ConversationReadResult, ConversationReadState } from "./conversations.api";
+import type { Conversation, ConversationReadResult, ConversationReadState } from "./conversations.types";
 import { isMessageNewerThanLastMessage, sortConversationsByLastMessage } from "./conversation-state-updates";
 
 // Получает пришедшую и уже сохранённую границы прочтения.

@@ -2,19 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { requestWithRetry, type RequestRetryState } from "../../lib/request-retry";
-import type { ClientMessage, Message, MessageDeletedEvent } from "../messages/messages.api";
-import type { VisibleMessagePosition } from "../messages/useLastVisibleMessage";
+import type { ClientMessage, Message, MessageDeletedEvent } from "../messages/messages.types";
+import type { VisibleMessagePosition } from "../messages/scroll/useLastVisibleMessage";
 import {
     applyConversationMessageEvent,
     isMessageNewerThanLastMessage,
     type ConversationMessageEvent,
 } from "./conversation-state-updates";
-import {
-    getConversations,
-    type Conversation,
-    type ConversationReadResult,
-    type ConversationReadState,
-} from "./conversations.api";
+import { getConversations } from "./conversations.api";
+import type { Conversation, ConversationReadResult, ConversationReadState } from "./conversations.types";
 import { applyConversationReadResult } from "./conversation-read-state";
 import { applyPeerReadReceipt } from "./conversation-read-receipts";
 import {

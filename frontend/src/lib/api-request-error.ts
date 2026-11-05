@@ -34,7 +34,7 @@ export const createApiRequestError = async (response: Response, fallback: string
         const body = (await response.json()) as { error?: string };
         message = body.error ?? fallback;
     } catch {
-        // Для ответа без JSON оставляем запасное сообщение.
+        // Если backend вернул не JSON, оставляем понятную ошибку по умолчанию.
     }
     // Проверяем попросил ли сервер подождать перед повтором
     const retryAfter = response.headers.get("Retry-After");

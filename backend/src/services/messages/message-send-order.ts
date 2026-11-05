@@ -1,7 +1,7 @@
-import type { Prisma } from "../generated/prisma/client.js";
-import type { messageInclude } from "../lib/message-include.js";
-import { prisma } from "../lib/prisma.js";
-import { AppError } from "../errors/app-error.js";
+import type { Prisma } from "../../generated/prisma/client.js";
+import type { messageInclude } from "./message-include.js";
+import { prisma } from "../../lib/prisma.js";
+import { AppError } from "../../errors/app-error.js";
 
 // для каждой отправки создаём общее ожидание её результата.
 // Следующее сообщение ждёт это ожидание и только после успеха сохраняется само.

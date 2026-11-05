@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Socket } from "socket.io-client";
 
-import type { Conversation } from "../conversations/conversations.api";
+import type { Conversation } from "../conversations/conversations.types";
 
 // Ждём ответ presence:get не больше 5 секунд. Это ожидание ответа, а не срок online-статуса.
 const PRESENCE_REQUEST_TIMEOUT_MS = 5000;

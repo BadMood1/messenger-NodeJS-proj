@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 
-import { getDirectConversations, getOrCreateDirectConversation } from "../services/conversation.service.js";
-import { markConversationRead } from "../services/conversation-read.service.js";
+import { getDirectConversations, getOrCreateDirectConversation } from "../services/conversations/conversation.service.js";
+import { markConversationRead } from "../services/conversations/conversation-read.service.js";
 import { conversationParamsSchema, markConversationReadSchema } from "../validators/conversation.schema.js";
 
 export const openDirectConversation = async (req: Request<{ userId: string }>, res: Response) => {

@@ -1,7 +1,7 @@
-import { AppError } from "../errors/app-error.js";
-import type { Prisma } from "../generated/prisma/client.js";
-import { prisma } from "../lib/prisma.js";
-import { publishConversationRead } from "../lib/socket.js";
+import { AppError } from "../../errors/app-error.js";
+import type { Prisma } from "../../generated/prisma/client.js";
+import { prisma } from "../../lib/prisma.js";
+import { publishConversationRead } from "../../realtime/socket.js";
 import { getConversationReadResult } from "./conversation-read-result.js";
 
 type ConversationReadState = {

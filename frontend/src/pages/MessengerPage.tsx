@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { ChatPanel } from "../components/messenger/ChatPanel";
+import { ChatPanel } from "../components/messenger/chat/ChatPanel";
 import { ConnectionStatus } from "../components/messenger/ConnectionStatus";
 import { ConversationSidebar } from "../components/messenger/ConversationSidebar";
 import { NavRail } from "../components/messenger/NavRail";
@@ -8,8 +8,8 @@ import { useAuth } from "../features/auth/useAuth";
 import { useConversations } from "../features/conversations/useConversations";
 import { useConversationRead } from "../features/conversations/useConversationRead";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
-import { useLastVisibleMessage } from "../features/messages/useLastVisibleMessage";
-import type { Message, MessageDeletedEvent } from "../features/messages/messages.api";
+import { useLastVisibleMessage } from "../features/messages/scroll/useLastVisibleMessage";
+import type { Message, MessageDeletedEvent } from "../features/messages/messages.types";
 import { useRealtimeConnection } from "../features/realtime/useRealtimeConnection";
 
 export const MessengerPage = () => {
@@ -164,21 +164,28 @@ export const MessengerPage = () => {
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     // дальше эти данные передадим в ChatPannel
-    const { connectionStatus, isPeerTyping, notifyTyping, stopTyping, presenceByUserId, isPeerOnline, peerLastSeenAt } =
-        useRealtimeConnection({
-            enabled: isAuthenticated,
-            conversations,
-            conversationId: selectedConversationId,
-            conversationUserId: selectedConversation?.user?.id ?? null,
-            getAccessToken,
-            resolveAccessTokenAfter401,
-            onMessageCreated, // socket получает событие, message hook обновляет messages
-            onMessageUpdated,
-            onMessageDeleted,
-            onConversationRead: handleConversationRead,
-            onConversationReadReceipt: handleConversationReadReceipt,
-            onConnected,
-        });
+    const {
+        connectionStatus,
+        isPeerTyping,
+        notifyTyping,
+        stopTyping,
+        presenceByUserId,
+        isPeerOnline,
+        peerLastSeenAt,
+    } = useRealtimeConnection({
+        enabled: isAuthenticated,
+        conversations,
+        conversationId: selectedConversationId,
+        conversationUserId: selectedConversation?.user?.id ?? null,
+        getAccessToken,
+        resolveAccessTokenAfter401,
+        onMessageCreated, // socket получает событие, message hook обновляет messages
+        onMessageUpdated,
+        onMessageDeleted,
+        onConversationRead: handleConversationRead,
+        onConversationReadReceipt: handleConversationReadReceipt,
+        onConnected,
+    });
     const isOffline = connectionStatus === "offline";
 
     // ------- ВЫБОР ДИАЛОГА -------
