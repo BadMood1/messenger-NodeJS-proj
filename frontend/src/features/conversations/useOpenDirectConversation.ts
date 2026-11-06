@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { openDirectConversation } from "./conversations.api";
@@ -37,19 +37,20 @@ export const useOpenDirectConversation = ({
     // Получает закрытие окна пользователем.
     // Сразу отменяет текущий POST и снимает блокировку запроса.
     // Сохраняет UI-снимок до конца анимации закрытия окна.
-    const cancelOpeningConversation = () => {
+    // Стабильная ссылка нужна cleanup Friends: ререндер панели сам по себе не должен отменять POST.
+    const cancelOpeningConversation = useCallback(() => {
         openingControllerRef.current?.abort();
         openingControllerRef.current = null;
-    };
+    }, []);
 
     // Получает новое открытие окна или изменение поискового ввода.
     // Отменяет прежнюю попытку и очищает её ожидание/ошибку.
     // Подготавливает окно к новому выбору пользователя.
-    const resetConversationOpening = () => {
+    const resetConversationOpening = useCallback(() => {
         cancelOpeningConversation();
         setOpeningUserId(null);
         setOpeningError(null);
-    };
+    }, [cancelOpeningConversation]);
 
     // Получает id пользователя из результата поиска или кнопки Retry.
     // Находит готовый диалог в списке либо получает его через POST, защищаясь от повторных кликов.

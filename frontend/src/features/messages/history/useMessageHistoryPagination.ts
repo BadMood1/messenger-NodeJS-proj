@@ -202,29 +202,31 @@ export const useMessageHistoryPagination = ({
     // Вызывается по кнопке перехода к последним сообщениям открытого чата.
     // Если конец ещё не загружен — запрашивает последнее окно, иначе плавно прокручивает DOM.
     // Использует существующие загрузку и защиту от устаревших ответов; прочтение не меняет.
-    const scrollToLatestMessages = () => {
+    const scrollToLatestMessages = useCallback(() => {
         if (!enabled || initialLoadingRef.current || historyConversationId !== conversationIdRef.current)
             return;
         if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
         else scrollToBottom();
-    };
+    }, [enabled, initialLoadingRef, historyConversationId, conversationIdRef, historyCursorsRef,
+        loadHistoryPage, scrollToBottom]);
 
     // Получает scroll-событие контейнера сообщений из ChatPanel.
     // У нужного края запрашивает страницу, если соответствующий cursor ещё существует.
     // Ничего не запускает повторно при активном запросе или ошибке до Retry.
-    const handleMessagesScroll = () => {
+    const handleMessagesScroll = useCallback(() => {
         updateIsScrolledAwayFromBottom();
         if (paginationError) return;
         if (isNearBottom() && historyCursorsRef.current.newerCursor) void loadHistoryPage("newer");
         else if (isNearTop()) void loadHistoryPage("older");
-    };
+    }, [updateIsScrolledAwayFromBottom, paginationError, isNearBottom, historyCursorsRef,
+        loadHistoryPage, isNearTop]);
 
     // Получает текущее направление неудачной загрузки из state.
     // Повторяет тот же запрос после нажатия Retry.
     // При успехе убирает ошибку и дополняет историю обычным путём.
-    const retryHistoryPage = () => {
+    const retryHistoryPage = useCallback(() => {
         if (paginationError) void loadHistoryPage(paginationError.direction);
-    };
+    }, [paginationError, loadHistoryPage]);
 
     // Автоматическая дозагрузка сообщений вниз, но даже если user не скроллил
     // Новые сообщ. появились на экране? Тогда effect чекает мы всё ещё близко к низу? Если да - загружает ещё
@@ -246,9 +248,9 @@ export const useMessageHistoryPagination = ({
     // Вызывается после добавления optimistic-сообщения или Retry.
     // Если конец переписки ещё не загружен, запускает существующий переход latest.
     // Сохраняет общую отмену pagination/reconnect и не создаёт отдельный запрос отправки.
-    const requestLatestWindowForSend = () => {
+    const requestLatestWindowForSend = useCallback(() => {
         if (historyCursorsRef.current.newerCursor) void loadHistoryPage("latest");
-    };
+    }, [historyCursorsRef, loadHistoryPage]);
 
     return {
         loadingDirection, setLoadingDirection,

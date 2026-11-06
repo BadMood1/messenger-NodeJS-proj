@@ -1,4 +1,4 @@
-import { MessageCircleMore, Search, UserRound, UsersRound, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Conversation } from "../../features/conversations/conversations.types";
@@ -7,6 +7,8 @@ import type { RequestRetryState } from "../../lib/request-retry";
 import { getInitials } from "../../lib/get-initials";
 import { RequestRetryStatus } from "./RequestRetryStatus";
 import { NewConversationDialog } from "./conversations/NewConversationDialog";
+import { MessengerMobileNav } from "./MessengerMobileNav";
+import type { MessengerSection } from "./NavRail";
 
 type ConversationSidebarProps = {
     conversations: Conversation[];
@@ -20,6 +22,7 @@ type ConversationSidebarProps = {
     selectedConversationId: string | null;
     onSelectConversation: (id: string) => void;
     onDirectConversationOpened: (conversation: Conversation) => void;
+    onSelectSection: (section: MessengerSection) => void;
 };
 
 // Получает дату последнего сообщения или дату создания пустого диалога.
@@ -147,6 +150,7 @@ export const ConversationSidebar = ({
     selectedConversationId,
     onSelectConversation,
     onDirectConversationOpened,
+    onSelectSection,
 }: ConversationSidebarProps) => {
     const [searchQuery, setSearchQuery] = useState("");
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -255,20 +259,7 @@ export const ConversationSidebar = ({
                 )}
             </div>
 
-            <nav className="flux-mobile-nav" aria-label="Мобильная навигация">
-                <button type="button" className="text-blue-600 dark:text-cyan-300">
-                    <MessageCircleMore size={20} strokeWidth={1.8} aria-hidden="true" />
-                    Chats
-                </button>
-                <button type="button">
-                    <UsersRound size={20} strokeWidth={1.8} aria-hidden="true" />
-                    Friends
-                </button>
-                <button type="button">
-                    <UserRound size={20} strokeWidth={1.8} aria-hidden="true" />
-                    Profile
-                </button>
-            </nav>
+            <MessengerMobileNav activeSection="chats" onSelectSection={onSelectSection} />
         </aside>
     );
 };

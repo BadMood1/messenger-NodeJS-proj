@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 
 import type { AuthenticatedRequest } from "../../auth/authenticated-request";
 import type { ClientMessage, Message, MessageSender } from "../messages.types";
@@ -34,16 +34,16 @@ export const useMessageSending = ({
     // Получает id чата.
     // Находит последнюю отправку этого чата, чей POST ещё выполняется.
     // Возвращает её clientMessageId или undefined, если зависимость уже не нужна.
-    const getPreviousPendingClientMessageId = (currentConversationId: string) =>
+    const getPreviousPendingClientMessageId = useCallback((currentConversationId: string) =>
         [...sendingMessagesRef.current.values()]
             .filter((message) => message.conversationId === currentConversationId)
-            .at(-1)?.clientMessageId ?? undefined;
+            .at(-1)?.clientMessageId ?? undefined, []);
 
     // выполняет POST и заменяет temp-сообщение на серверное, либо помечает его как failed.
     // Получает временное сообщение с клиентским id и необязательным предшественником.
     // Выполняет POST один раз и применяет подтверждение либо failed к актуальному чату.
     // После завершения убирает отправку из таблицы выполняющихся запросов.
-    const deliverMessage = async (pending: ClientMessage) => {
+    const deliverMessage = useCallback(async (pending: ClientMessage) => {
         if (sendingMessagesRef.current.has(pending.id)) return; // проверка повторной отправки, если пользователь быстро нажал кнопку несколько раз.
         sendingMessagesRef.current.set(pending.id, pending); // регистрируем отправку
 
@@ -94,12 +94,13 @@ export const useMessageSending = ({
         } finally {
             sendingMessagesRef.current.delete(pending.id);
         }
-    };
+    }, [authenticatedRequest, conversationIdRef, historyVersionRef, setMessages, applyKnownChanges]);
 
     // Получает текст и необязательное сообщение для Reply.
     // Добавляет optimistic-сообщение и сразу запускает POST, связывая его с предыдущей отправкой.
     // Обновляет список и запрашивает конец истории, если пользователь читал старый участок.
-    const sendMessage = (content: string, replyTo?: Message) => {
+    // Стабильные обработчики не заставляют memo(ChatPanel) перерисовывать всю историю при смене раздела.
+    const sendMessage = useCallback((content: string, replyTo?: Message) => {
         const currentConversationId = conversationIdRef.current;
 
         if (!currentConversationId || !enabled || !currentUser) {
@@ -140,12 +141,13 @@ export const useMessageSending = ({
         requestLatestWindowForSend();
         // Ошибки POST остаются в bubble, а composer можно сразу использовать снова.
         void deliverMessage(pending); // асинхронно отправляем на сервер, не дожидаясь ответа.
-    };
+    }, [conversationIdRef, enabled, currentUser, getPreviousPendingClientMessageId, scrollToBottomAfterUpdate,
+        setMessages, requestLatestWindowForSend, deliverMessage]);
 
     // Получает id failed-сообщения из меню Retry.
     // Переносит ту же отправку вниз, обновляет время и определяет нового предшественника.
     // Повторяет POST с прежними content, reply и clientMessageId.
-    const retryMessage = (messageId: string) => {
+    const retryMessage = useCallback((messageId: string) => {
         const pending = messages.find((message) => message.id === messageId);
         if (!pending || pending.localStatus !== "failed" || sendingMessagesRef.current.has(messageId)) return;
         const now = new Date().toISOString();
@@ -165,18 +167,19 @@ export const useMessageSending = ({
         ]);
         requestLatestWindowForSend();
         void deliverMessage(retried);
-    };
+    }, [messages, getPreviousPendingClientMessageId, scrollToBottomAfterUpdate, setMessages,
+        requestLatestWindowForSend, deliverMessage]);
 
     // Получает id сообщения, которое пользователь решил удалить.
     // Если это локальное failed-сообщение, убирает его из state, когда POST уже завершён.
     // Возвращает true для локального failed: DELETE API для него вызывать не нужно.
-    const discardFailedMessage = (messageId: string) => {
+    const discardFailedMessage = useCallback((messageId: string) => {
         if (!messages.some((message) => message.id === messageId && message.localStatus === "failed")) return false;
         if (!sendingMessagesRef.current.has(messageId)) {
             setMessages((current) => current.filter((message) => message.id !== messageId));
         }
         return true;
-    };
+    }, [messages, setMessages]);
 
     return { sendMessage, retryMessage, discardFailedMessage };
 };

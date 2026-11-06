@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, Search, SquarePen, X } from "lucide-react";
+import { ArrowRight, LoaderCircle, Plus, Search, X } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { useAuth } from "../../../features/auth/useAuth";
@@ -186,7 +186,7 @@ export const NewConversationDialog = ({
                     aria-label="New chat"
                     title="New chat"
                 >
-                    <SquarePen size={20} strokeWidth={1.8} aria-hidden="true" />
+                    <Plus size={22} strokeWidth={1.8} aria-hidden="true" />
                 </button>
             </DialogTrigger>
             <DialogContent

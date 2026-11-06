@@ -1,28 +1,13 @@
 @import "./shell.css";
 @import "./conversations.css";
 @import "./chat.css";
+@import "./friends.css";
+@import "./workspace.css";
 
 @layer components {
     @media (width < 64rem) {
         .flux-messenger-shell {
             height: var(--flux-mobile-height, 100dvh);
-        }
-
-        /* Один selected id переключает list/chat; bottom nav скрывается вместе со списком. */
-        .flux-messenger-shell[data-chat-open="true"] .flux-conversation-sidebar {
-            display: none;
-        }
-
-        .flux-messenger-shell[data-chat-open="true"] .flux-chat-panel {
-            display: flex;
-            border: 0;
-            border-radius: 0;
-            box-shadow: none;
-            animation: flux-fade-in 120ms ease-out;
-        }
-
-        .flux-messenger-shell[data-chat-open="false"] .flux-conversation-sidebar {
-            animation: flux-fade-in 120ms ease-out;
         }
 
         .flux-chat-header {
@@ -44,13 +29,6 @@
         .flux-composer-input {
             /* 16px предотвращает автоматический zoom при фокусе input на iOS. */
             font-size: 1rem;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .flux-messenger-shell[data-chat-open] .flux-chat-panel,
-            .flux-messenger-shell[data-chat-open] .flux-conversation-sidebar {
-                animation: none;
-            }
         }
 
         .flux-conversation-list {

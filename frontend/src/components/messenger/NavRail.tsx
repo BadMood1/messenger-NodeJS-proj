@@ -1,10 +1,14 @@
 import { MessageCircleMore, Settings, UsersRound } from "lucide-react";
 
+export type MessengerSection = "chats" | "friends";
+
 type NavRailProps = {
     username?: string;
+    activeSection: MessengerSection;
+    onSelectSection: (section: MessengerSection) => void;
 };
 
-export const NavRail = ({ username = "bmoood" }: NavRailProps) => {
+export const NavRail = ({ username = "bmoood", activeSection, onSelectSection }: NavRailProps) => {
     const avatarLetter = username.charAt(0).toUpperCase();
 
     return (
@@ -24,12 +28,22 @@ export const NavRail = ({ username = "bmoood" }: NavRailProps) => {
                 </div>
 
                 <div className="mt-10 flex w-full flex-col gap-2">
-                    <button type="button" className="flux-nav-item flux-nav-item-active" aria-current="page">
+                    <button
+                        type="button"
+                        className={`flux-nav-item${activeSection === "chats" ? " flux-nav-item-active" : ""}`}
+                        aria-current={activeSection === "chats" ? "page" : undefined}
+                        onClick={() => onSelectSection("chats")}
+                    >
                         <MessageCircleMore size={21} strokeWidth={1.8} aria-hidden="true" />
                         <span>Chats</span>
                     </button>
 
-                    <button type="button" className="flux-nav-item">
+                    <button
+                        type="button"
+                        className={`flux-nav-item${activeSection === "friends" ? " flux-nav-item-active" : ""}`}
+                        aria-current={activeSection === "friends" ? "page" : undefined}
+                        onClick={() => onSelectSection("friends")}
+                    >
                         <UsersRound size={21} strokeWidth={1.8} aria-hidden="true" />
                         <span>Friends</span>
                     </button>

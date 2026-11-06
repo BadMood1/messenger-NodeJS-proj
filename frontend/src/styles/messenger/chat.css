@@ -2,7 +2,7 @@
     /* ==================== CHAT ==================== */
 
     .flux-chat-panel {
-        @apply relative z-10 hidden h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-white/85 bg-linear-to-br from-white/98 via-[#f8fbff]/96 to-[#eef6ff]/92 shadow-[0_18px_52px_rgba(71,112,160,0.10)] dark:border-cyan-100/9 dark:from-[#07182a] dark:via-[#061423] dark:to-[#05111f] dark:shadow-[0_20px_58px_rgba(0,0,0,0.24)] lg:-ml-px lg:flex lg:rounded-[22px];
+        @apply relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden;
     }
 
     .flux-chat-header {
