@@ -37,6 +37,26 @@ export const isMessageNewerThanLastMessage = (
     return message.id > lastMessage.id;
 };
 
+// ------- ДИАЛОГ ИЗ ОТВЕТА ОТКРЫТИЯ -------
+// Получает список и готовый DIRECT-диалог из POST.
+// Добавляет новый; у известного обновляет собеседника, сохраняя текущие preview, unread и прочтение.
+// Возвращает новый отсортированный список с одной записью на каждый id.
+export const addOrUpdateDirectConversation = (
+    conversations: Conversation[],
+    openedConversation: Conversation,
+): Conversation[] => {
+    const existingConversation = conversations.find((conversation) => conversation.id === openedConversation.id);
+    // Если диалог уже загрузился через GET/socket, сохраняем его состояние и локальный прогресс.
+    const updatedConversation = existingConversation
+        ? { ...existingConversation, user: openedConversation.user }
+        : openedConversation;
+
+    return sortConversationsByLastMessage([
+        ...conversations.filter((conversation) => conversation.id !== openedConversation.id),
+        updatedConversation,
+    ]);
+};
+
 // ------- ОБНОВЛЕНИЕ PREVIEW И СЧЁТЧИКА -------
 // Получает список диалогов, сообщение и тип события: создание или правка.
 // Обновляет preview и сразу учитывает новое чужое сообщение после границы прочтения.

@@ -28,6 +28,7 @@ export const MessengerPage = () => {
         refreshError,
         requestRetry: conversationsRetry,
         retryConversations,
+        handleDirectConversationOpened,
         handleConversationRead,
         handleLocalConversationRead,
         handleConversationReadReceipt,
@@ -263,6 +264,7 @@ export const MessengerPage = () => {
                 onRetryConversations={retryConversations}
                 selectedConversationId={selectedConversationId}
                 onSelectConversation={handleSelectConversation}
+                onDirectConversationOpened={handleDirectConversationOpened}
             />
 
             {/* ==================== CHAT ==================== */}

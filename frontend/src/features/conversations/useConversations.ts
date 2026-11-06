@@ -6,6 +6,7 @@ import type { ClientMessage, Message, MessageDeletedEvent } from "../messages/me
 import type { VisibleMessagePosition } from "../messages/scroll/useLastVisibleMessage";
 import {
     applyConversationMessageEvent,
+    addOrUpdateDirectConversation,
     isMessageNewerThanLastMessage,
     type ConversationMessageEvent,
 } from "./conversation-state-updates";
@@ -22,6 +23,7 @@ import {
 
 type ConversationListEvent =
     | ConversationMessageEvent
+    | { type: "opened"; conversation: Conversation }
     | { type: "read"; result: ConversationReadResult }
     | { type: "receipt"; readState: ConversationReadState };
 
@@ -46,7 +48,7 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
     const isAutomaticReloadBlockedRef = useRef(false);
     const conversationsRef = useRef<Conversation[]>([]); // актуальный список для обработчиков событий
     const controllerRef = useRef<AbortController | null>(null); // контроллер текущего GET
-    const hasLoadedRef = useRef(false); // Была ли хотя бы одна успешная загрузка
+    const hasLoadedRef = useRef(false); // Есть ли подтверждённые данные для отображения списка
     const reloadQueuedRef = useRef(false); // Нужно ли выполнить еще один GET после текущего
     const eventsDuringLoadRef = useRef<ConversationListEvent[]>([]); // события полученные во время GET
     const deletedMessageIdsRef = useRef(new Set<string>()); // id сообщений, которые были удалены ( уже знаем )
@@ -59,6 +61,26 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         conversationsRef.current = nextConversations;
         setConversations(nextConversations);
     }, []);
+
+    // ------- ПОЛУЧЕНИЕ DIRECT-ДИАЛОГА ИЗ POST -------
+    // Получает готовый диалог после успешного открытия/создания.
+    // Добавляет его в список и сохраняет событие, если параллельно загружается GET списка.
+    // Обновляет state без повторного GET; текущий выбранный чат остаётся в MessengerPage.
+    const handleDirectConversationOpened = useCallback(
+        (conversation: Conversation) => {
+            if (!enabled) return;
+            if (controllerRef.current) eventsDuringLoadRef.current.push({ type: "opened", conversation });
+            updateConversationList(addOrUpdateDirectConversation(conversationsRef.current, conversation));
+            // Готовый диалог показываем и при незавершённой/неудачной первой загрузке списка.
+            if (!hasLoadedRef.current && !controllerRef.current) {
+                setRefreshError("Couldn't load the full conversation list. Please try again.");
+            }
+            hasLoadedRef.current = true;
+            setLoading(false);
+            setError(null);
+        },
+        [enabled, updateConversationList],
+    );
 
     // ------- ЗАПРОС ПОВТОРНОЙ ЗАГРУЗКИ -------
     // Получает запрос на повторную загрузку списка диалогов.
@@ -253,6 +275,14 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
                     // GET мог начаться до socket-события: применяем события к ответу, а не теряем их.
                     let updatedConversations = result;
                     for (const event of eventsDuringLoadRef.current) {
+                        // Если POST уже добавил новый диалог, GET, начатый раньше, сохраняет его в списке.
+                        if (event.type === "opened") {
+                            updatedConversations = addOrUpdateDirectConversation(
+                                updatedConversations,
+                                event.conversation,
+                            );
+                            continue;
+                        }
                         if (event.type === "receipt") {
                             updatedConversations = applyPeerReadReceipt(
                                 updatedConversations,
@@ -356,6 +386,7 @@ export const useConversations = ({ enabled, authenticatedRequest }: UseConversat
         refreshError: enabled ? refreshError : null,
         requestRetry: enabled ? requestRetry : null,
         retryConversations,
+        handleDirectConversationOpened,
         handleConversationRead,
         handleLocalConversationRead,
         handleConversationReadReceipt,

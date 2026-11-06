@@ -1,8 +1,10 @@
-import { LoaderCircle, Search, SquarePen, X } from "lucide-react";
+import { ArrowRight, LoaderCircle, Search, SquarePen, X } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { useAuth } from "../../../features/auth/useAuth";
 import { useUserSearch } from "../../../features/users/useUserSearch";
+import { useOpenDirectConversation } from "../../../features/conversations/useOpenDirectConversation";
+import type { Conversation } from "../../../features/conversations/conversations.types";
 import { getInitials } from "../../../lib/get-initials";
 import {
     Dialog,
@@ -14,10 +16,22 @@ import {
 } from "../../ui/dialog";
 import { RequestRetryStatus } from "../RequestRetryStatus";
 
-// Получает состояния поиска пользователей из useUserSearch.
-// Выбирает подсказку, загрузку, Retry, пустой результат или список найденных пользователей.
-// Возвращает содержимое области результатов; открытие чата подключается следующим шагом.
-const UserSearchResults = ({ search }: { search: ReturnType<typeof useUserSearch> }) => {
+type NewConversationDialogProps = {
+    conversations: Conversation[];
+    onDirectConversationOpened: (conversation: Conversation) => void;
+    onSelectConversation: (conversationId: string) => void;
+};
+
+type UserSearchResultsProps = {
+    search: ReturnType<typeof useUserSearch>;
+    openingUserId: string | null;
+    onOpenConversationForUser: (userId: string) => Promise<void>;
+};
+
+// Получает состояния поиска, id ожидающего пользователя и обработчик выбора.
+// Выбирает подсказку, загрузку, Retry, пустой результат или кнопки найденных пользователей.
+// Возвращает результаты; во время POST показывает loader выбранной строки и блокирует повторные клики.
+const UserSearchResults = ({ search, openingUserId, onOpenConversationForUser }: UserSearchResultsProps) => {
     const { users, isLoading, error, requestRetry, isSearchQueryLongEnough, retryUserSearch } = search;
 
     if (!isSearchQueryLongEnough) {
@@ -56,20 +70,42 @@ const UserSearchResults = ({ search }: { search: ReturnType<typeof useUserSearch
             aria-label="Found users"
         >
             {users.map((user) => (
-                <li key={user.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5">
-                    <div className="flux-conversation-avatar overflow-hidden" aria-hidden="true">
-                        {user.image ? (
-                            <img src={user.image} alt="" className="size-full object-cover" />
+                <li key={user.id}>
+                    <button
+                        type="button"
+                        className="flux-conversation-row disabled:opacity-60"
+                        disabled={openingUserId !== null}
+                        aria-busy={openingUserId === user.id}
+                        aria-label={`Open chat with @${user.username}`}
+                        onClick={() => void onOpenConversationForUser(user.id)}
+                    >
+                        <div className="flux-conversation-avatar overflow-hidden" aria-hidden="true">
+                            {user.image ? (
+                                <img src={user.image} alt="" className="size-full object-cover" />
+                            ) : (
+                                getInitials(user.name || user.username)
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">{user.name || user.username}</p>
+                            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                @{user.username}
+                            </p>
+                        </div>
+                        {openingUserId === user.id ? (
+                            <LoaderCircle
+                                size={18}
+                                className="shrink-0 animate-spin motion-reduce:animate-none"
+                                aria-hidden="true"
+                            />
                         ) : (
-                            getInitials(user.name || user.username)
+                            <ArrowRight
+                                size={17}
+                                className="shrink-0 text-slate-400 dark:text-slate-500"
+                                aria-hidden="true"
+                            />
                         )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">{user.name || user.username}</p>
-                        <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                            @{user.username}
-                        </p>
-                    </div>
+                    </button>
                 </li>
             ))}
         </ul>
@@ -77,28 +113,67 @@ const UserSearchResults = ({ search }: { search: ReturnType<typeof useUserSearch
 };
 
 // Вызывается кнопкой New chat в header списка диалогов.
-// Управляет окном и вводом, передаёт username в отдельный хук поиска.
+// Управляет окном, поисковым вводом и передачей выбранного диалога родителю.
 // Возвращает trigger и модалку; запросы выполняются только при открытом окне.
-export const NewConversationDialog = () => {
+export const NewConversationDialog = ({
+    conversations,
+    onDirectConversationOpened,
+    onSelectConversation,
+}: NewConversationDialogProps) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const searchInputRef = useRef<HTMLInputElement>(null);
     const { authenticatedRequest } = useAuth();
     const search = useUserSearch({ query: searchQuery, isEnabled: isOpen, authenticatedRequest });
 
+    // !!! Получает готовый диалог из списка либо ответа POST.
+    const handleConversationReady = (conversation: Conversation) => {
+        onDirectConversationOpened(conversation); // обновл. список. Вызыв. handleDirectConversationOpened из useConversations
+        onSelectConversation(conversation.id); // выбир. чат. selectConversationFromUserSearch из Sidebar
+        setIsOpen(false); // закрываем окно поиска
+    };
+
+    const {
+        openingUserId,
+        openingError,
+        openConversationForUser,
+        cancelOpeningConversation,
+        resetConversationOpening,
+    } = useOpenDirectConversation({
+        isEnabled: isOpen,
+        conversations,
+        authenticatedRequest,
+        onConversationReady: handleConversationReady,
+    });
+
     // Получает новое состояние открытия от Radix.
-    // При открытии очищает ввод; при закрытии отключает поиск, сохраняя текст до конца анимации.
-    // Обновляет видимость окна, а отмену GET выполняет cleanup хука.
+    // При открытии очищает ввод и ошибку; при закрытии сразу отменяет POST.
+    // Меняет видимость, сохраняя содержимое на время анимации; GET отменит cleanup поиска.
     const changeDialogOpen = (open: boolean) => {
-        if (open) setSearchQuery("");
+        if (open) {
+            resetConversationOpening();
+            search.clearUserSearchResults();
+            setSearchQuery("");
+        } else {
+            cancelOpeningConversation();
+        }
         setIsOpen(open);
+    };
+
+    // Получает новый текст из поискового поля.
+    // Сбрасывает ошибку открытия предыдущего пользователя и обновляет username.
+    // Передаёт новый ввод в существующий debounce поиска.
+    const changeUserSearch = (query: string) => {
+        resetConversationOpening();
+        setSearchQuery(query);
     };
 
     // Получает нажатие крестика внутри поискового поля.
     // Очищает username и возвращает фокус в input.
     // Показывает начальную подсказку; прежний поиск отменит хук.
     const clearUserSearch = () => {
-        setSearchQuery("");
+        search.clearUserSearchResults();
+        changeUserSearch("");
         searchInputRef.current?.focus();
     };
 
@@ -138,7 +213,8 @@ export const NewConversationDialog = () => {
                             ref={searchInputRef}
                             type="search"
                             value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
+                            disabled={openingUserId !== null}
+                            onChange={(event) => changeUserSearch(event.target.value)}
                             placeholder="Search by username…"
                             aria-label="Search users by username"
                         />
@@ -146,7 +222,7 @@ export const NewConversationDialog = () => {
                             type="button"
                             onClick={clearUserSearch}
                             className="flux-icon-button size-7 shrink-0 transition-[opacity,scale,background-color,color] duration-120 disabled:pointer-events-none disabled:opacity-0 motion-reduce:transition-none"
-                            disabled={!searchQuery}
+                            disabled={!searchQuery || openingUserId !== null}
                             aria-hidden={!searchQuery}
                             aria-label="Clear user search"
                         >
@@ -154,7 +230,20 @@ export const NewConversationDialog = () => {
                         </button>
                     </div>
                 </div>
-                <UserSearchResults search={search} />
+                <UserSearchResults
+                    search={search}
+                    openingUserId={openingUserId}
+                    onOpenConversationForUser={openConversationForUser}
+                />
+                {openingError && (
+                    <div className="shrink-0 border-t border-blue-100/70 dark:border-white/7">
+                        <RequestRetryStatus
+                            retry={null}
+                            error={openingError.message}
+                            onRetry={() => void openConversationForUser(openingError.userId)}
+                        />
+                    </div>
+                )}
             </DialogContent>
         </Dialog>
     );

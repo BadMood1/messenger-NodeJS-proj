@@ -19,6 +19,7 @@ type ConversationSidebarProps = {
     onRetryConversations: () => void;
     selectedConversationId: string | null;
     onSelectConversation: (id: string) => void;
+    onDirectConversationOpened: (conversation: Conversation) => void;
 };
 
 // Получает дату последнего сообщения или дату создания пустого диалога.
@@ -145,6 +146,7 @@ export const ConversationSidebar = ({
     onRetryConversations,
     selectedConversationId,
     onSelectConversation,
+    onDirectConversationOpened,
 }: ConversationSidebarProps) => {
     const [searchQuery, setSearchQuery] = useState("");
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +166,14 @@ export const ConversationSidebar = ({
     const clearConversationSearch = () => {
         setSearchQuery("");
         searchInputRef.current?.focus();
+    };
+
+    // Получает id диалога, выбранного через New chat.
+    // Убирает фильтр списка и передаёт выбор в MessengerPage.
+    // Показывает выбранный диалог в полном списке, включая только что созданный.
+    const selectConversationFromUserSearch = (conversationId: string) => {
+        setSearchQuery("");
+        onSelectConversation(conversationId);
     };
 
     return (
@@ -208,7 +218,11 @@ export const ConversationSidebar = ({
                             <X size={16} strokeWidth={1.8} aria-hidden="true" />
                         </button>
                     </div>
-                    <NewConversationDialog />
+                    <NewConversationDialog
+                        conversations={conversations}
+                        onDirectConversationOpened={onDirectConversationOpened}
+                        onSelectConversation={selectConversationFromUserSearch}
+                    />
                 </div>
             </header>
 

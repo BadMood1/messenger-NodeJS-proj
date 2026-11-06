@@ -12,7 +12,6 @@ type ConversationReadState = {
 
 type ConversationReadSummary = ConversationReadState & {
     unreadCount: number;
-    firstUnreadMessageId: string | null;
 };
 
 const readStateSelect = {
@@ -23,8 +22,9 @@ const readStateSelect = {
 } as const;
 
 // ------- ГРАНИЦЫ И НЕПРОЧИТАННЫЕ ДЛЯ СПИСКА ДИАЛОГОВ -------
-// берёт границы прочтения пользователя и для каждого чата вычисляет:
-// сколько чужих сообщений не прочитано и какое из них первое
+// Получает границы прочтения пользователя для переданных диалогов.
+// Одним groupBy считает чужие сообщения после каждой границы.
+// Возвращает те же границы с unreadCount; если группы нет, счётчик равен нулю.
 export const getConversationReadSummaries = async (
     tx: Prisma.TransactionClient,
     userId: string,
@@ -73,75 +73,23 @@ export const getConversationReadSummaries = async (
         OR: conversationFilters,
     };
 
-    // ------- КОЛИЧЕСТВО И ПЕРВАЯ ДАТА -------
+    // ------- КОЛИЧЕСТВО НЕПРОЧИТАННЫХ -------
     // возвращ. для каждого conversationId и остальное(можно чекнуть)
     // Если у чата нет непрочитанных, объекта для него в этом массиве не будет.
     const unreadGroups = await tx.message.groupBy({
         by: ["conversationId"],
         where: unreadWhere, // только чужие непрочитанные
         _count: { _all: true }, // в конце вернём из ф-ции
-        _min: { createdAt: true }, // самая ранняя(первая) дата непрочитанного
-    });
-
-    // unreadGroups - для каждого id храним дату первого непрочитанного
-
-    // если ни в одном переданном чате нет непрочитанных
-    if (unreadGroups.length === 0) {
-        return readStates.map((state) => ({ ...state, unreadCount: 0, firstUnreadMessageId: null }));
-    }
-
-    // ------- ПЕРВОЕ СООБЩЕНИЕ НА НАЙДЕННОЙ ДАТЕ -------
-
-    // Для каждого чата создаём условие: id этого чата и его первая непрочитанная дата.
-    const firstUnreadDateFilters = unreadGroups.map((group) => {
-        if (!group._min.createdAt) {
-            throw new AppError(500, "Failed to load first unread message date");
-        }
-
-        return {
-            conversationId: group.conversationId,
-            createdAt: group._min.createdAt,
-        };
-    });
-
-    // Сообщение должно совпасть хотя бы с одной парой «чат + первая дата».
-    // Выбираем одну подходящую пару из всех пар(OR относится к парам именно, если AND,
-    // то будет относится к двум chat id - это невозможно)
-    const earliestUnreadDateFilter: Prisma.MessageWhereInput = {
-        OR: firstUnreadDateFilters,
-    };
-
-    // ОДНОВРЕМЕННО чужое непрочитанное И на первой непрочитанной дате своего чата
-    // т.е. те, которые на той же дате первой непрочитанной, но наши, отфильтруются. Также как и чужие,
-    // которые позже даты
-    const firstUnreadMessageFilter: Prisma.MessageWhereInput = {
-        AND: [unreadWhere, earliestUnreadDateFilter],
-    };
-
-    // Для каждого чата берём id первого непрочитанного сообщения
-    const firstUnreadGroups = await tx.message.groupBy({
-        by: ["conversationId"],
-        where: firstUnreadMessageFilter,
-        // Допускаем совпадение дат, тогда сравниваем id
-        _min: { id: true },
     });
 
     // ------- МЕТАДАННЫЕ ДЛЯ ВСЕХ ДИАЛОГОВ -------
     const unreadCountsByConversationId = new Map(
         unreadGroups.map((group) => [group.conversationId, group._count._all]),
     );
-    const firstUnreadIdsByConversationId = new Map(
-        firstUnreadGroups.map((group) => [group.conversationId, group._min.id]),
-    );
-
-    return readStates.map((state) => {
-        const unreadCount = unreadCountsByConversationId.get(state.conversationId) ?? 0;
-        const firstUnreadMessageId = firstUnreadIdsByConversationId.get(state.conversationId) ?? null;
-        if (unreadCount > 0 && !firstUnreadMessageId) {
-            throw new AppError(500, "Failed to load first unread message");
-        }
-        return { ...state, unreadCount, firstUnreadMessageId };
-    });
+    return readStates.map((state) => ({
+        ...state,
+        unreadCount: unreadCountsByConversationId.get(state.conversationId) ?? 0,
+    }));
 };
 
 // ------- СОХРАНЕНИЕ ПРОЧТЕНИЯ -------

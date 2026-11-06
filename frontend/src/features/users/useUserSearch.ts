@@ -105,6 +105,11 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
         setRetryVersion((version) => version + 1);
     };
 
+    // Получает новое открытие окна или очистку поискового поля.
+    // Убирает сохранённый результат предыдущего поиска.
+    // Следующий ввод ожидает свежий GET вместо краткого показа старого списка.
+    const clearUserSearchResults = () => setSearchState(null);
+
     return {
         users: isSearchQueryLongEnough ? (currentSearchState?.users ?? []) : [],
         isLoading: isSearchQueryLongEnough && (!currentSearchState || currentSearchState.isLoading),
@@ -112,5 +117,6 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
         requestRetry: isSearchQueryLongEnough ? (currentSearchState?.requestRetry ?? null) : null,
         isSearchQueryLongEnough,
         retryUserSearch,
+        clearUserSearchResults,
     };
 };
