@@ -7,7 +7,7 @@ import type { Friend } from "./friends.types";
 
 // Получает защищённый request и признак открытого раздела Friends.
 // Загружает список с ограниченными повторами, сохраняя прежние данные при смене раздела.
-// Возвращает друзей, состояния загрузки/ошибки, ручной Retry и удаление из списка.
+// Возвращает друзей, состояния загрузки/ошибки, ручной Retry и локальное добавление/удаление.
 export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled: boolean) => {
     // null — успешной загрузки ещё не было; [] — уже получили настоящий пустой список.
     const [friends, setFriends] = useState<Friend[] | null>(null);
@@ -15,14 +15,16 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
     const [error, setError] = useState<string | null>(null);
     const [requestRetry, setRequestRetry] = useState<RequestRetryState | null>(null);
     const [reloadVersion, setReloadVersion] = useState(0);
-    const removedFriendIdsDuringLoadRef = useRef(new Set<string>());
+    // Во время GET чтобы не потерялись действия
+    // Значение Friend — добавили друга; null — удалили. Запоминаем изменения для текущего GET.
+    const friendChangesDuringLoadRef = useRef(new Map<string, Friend | null>());
 
     // ------- ЗАГРУЗКА СПИСКА -------
     useEffect(() => {
         if (!isEnabled) return;
         const controller = new AbortController();
-        const removedFriendIdsDuringLoad = new Set<string>();
-        removedFriendIdsDuringLoadRef.current = removedFriendIdsDuringLoad;
+        const friendChangesDuringLoad = new Map<string, Friend | null>();
+        friendChangesDuringLoadRef.current = friendChangesDuringLoad;
 
         // Получает запуск раздела или новую попытку загрузки.
         // Выполняет GET через общую политику retry и сохраняет успешный ответ.
@@ -43,7 +45,12 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
                 );
                 if (controller.signal.aborted) return;
                 // Если DELETE завершился во время GET, старый ответ не возвращает друга в список.
-                setFriends(result.filter((friend) => !removedFriendIdsDuringLoad.has(friend.id)));
+                const unchangedFriends = result.filter((friend) => !friendChangesDuringLoad.has(friend.id));
+                // Если приняли заявку во время GET, ставим добавленных друзей перед старым списком.
+                const addedFriends = [...friendChangesDuringLoad.values()]
+                    .filter((friend) => friend !== null)
+                    .reverse();
+                setFriends([...addedFriends, ...unchangedFriends]);
             } catch (error) {
                 if (controller.signal.aborted) return;
                 setError(error instanceof Error ? error.message : "Failed to load friends");
@@ -62,14 +69,36 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
     // Повторяет GET; сам обработчик не отправляет запрос.
     const retryFriends = () => setReloadVersion((version) => version + 1);
 
+    // ------- ЛОКАЛЬНОЕ ДОБАВЛЕНИЕ И УДАЛЕНИЕ -------
+    // Получает пользователя после успешного принятия входящей заявки.
+    // Добавляет его первым без дубля; если первый GET ещё идёт, сохраняет добавление для его ответа.
+    // Обновляет загруженный список друзей без нового запроса.
+    const addFriendToList = (friend: Friend) => {
+        friendChangesDuringLoadRef.current.set(friend.id, friend);
+        setFriends((previousFriends) => {
+            // Если полный список ещё не загрузился, не подменяем его одним новым другом.
+            if (previousFriends === null) return null;
+            return [friend, ...previousFriends.filter((item) => item.id !== friend.id)];
+        });
+    };
+
     // Получает id друга после подтверждения в модалке.
     // Удаляет дружбу через API и исключает пользователя из текущего списка.
     // Обновляет UI без GET; при ошибке оставляет список прежним и пробрасывает ошибку модалке.
     const removeFriendFromList = async (userId: string) => {
         await removeFriend(userId, authenticatedRequest);
-        removedFriendIdsDuringLoadRef.current.add(userId);
+        friendChangesDuringLoadRef.current.set(userId, null);
         setFriends((previousFriends) => previousFriends?.filter((friend) => friend.id !== userId) ?? null);
     };
 
-    return { friends: friends ?? [], hasLoaded: friends !== null, isLoading, error, requestRetry, retryFriends, removeFriendFromList };
+    return {
+        friends: friends ?? [],
+        hasLoaded: friends !== null,
+        isLoading,
+        error,
+        requestRetry,
+        retryFriends,
+        addFriendToList,
+        removeFriendFromList,
+    };
 };

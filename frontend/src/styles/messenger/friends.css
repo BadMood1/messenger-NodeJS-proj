@@ -3,12 +3,40 @@
         @apply relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden;
     }
 
+    .flux-friends-tabs {
+        @apply mx-auto flex w-full max-w-3xl gap-1 rounded-2xl border border-blue-100/60 bg-blue-50/55 p-1 dark:border-white/6 dark:bg-white/3;
+    }
+
+    .flux-friends-tab {
+        @apply flex min-h-10 min-w-0 flex-1 items-center justify-center rounded-xl px-2 text-xs font-medium text-slate-500 transition-colors duration-150 hover:bg-white/60 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-400 active:bg-blue-100/60 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-cyan-300 dark:focus-visible:outline-cyan-400 dark:active:bg-white/10 sm:text-sm;
+    }
+
+    .flux-friends-tab[aria-pressed="true"] {
+        @apply bg-white text-blue-600 shadow-sm dark:bg-blue-400/12 dark:text-cyan-300 dark:shadow-none;
+    }
+
+    .flux-friends-tab-count {
+        @apply text-[11px] font-normal tabular-nums sm:text-[13px];
+    }
+
+    .flux-friends-list-view {
+        animation: flux-fade-in 120ms ease-out;
+    }
+
     .flux-friend-row {
         @apply flex min-w-0 items-center gap-1 rounded-2xl border border-blue-100/65 bg-white/65 px-2 transition-colors duration-150 hover:bg-blue-50/70 dark:border-white/6 dark:bg-white/3 dark:hover:bg-white/5;
     }
 
     .flux-friend-open {
         @apply flex min-h-17 min-w-0 flex-1 items-center gap-3 rounded-xl py-3.5 pl-1 pr-2 text-left focus-visible:outline-2 focus-visible:outline-blue-400 disabled:opacity-60 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-friend-request-action {
+        @apply inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-100/80 bg-white/60 px-3 text-xs font-medium text-slate-500 transition-colors duration-150 hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-400 active:bg-blue-100/70 disabled:opacity-50 dark:border-white/8 dark:bg-white/3 dark:text-slate-400 dark:hover:bg-white/7 dark:hover:text-slate-200 dark:focus-visible:outline-cyan-400 dark:active:bg-white/10;
+    }
+
+    .flux-friend-request-accept {
+        @apply bg-blue-50 text-blue-600 hover:bg-blue-100/70 dark:bg-blue-400/12 dark:text-cyan-300 dark:hover:bg-blue-400/20 dark:hover:text-cyan-200;
     }
 
     .flux-friend-copy-feedback {
@@ -20,7 +48,9 @@
     @media (hover: hover) and (pointer: fine) {
         .flux-friend-more {
             opacity: 0;
-            transition: opacity 120ms ease-out, background-color 120ms ease-out;
+            transition:
+                opacity 120ms ease-out,
+                background-color 120ms ease-out;
         }
 
         .flux-friend-row:hover .flux-friend-more,
@@ -31,9 +61,16 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .flux-friend-copy-feedback {
+        .flux-friend-copy-feedback,
+        .flux-friends-list-view {
             animation: none;
         }
-        .flux-friend-more { transition: none; }
+        .flux-friends-tab,
+        .flux-friend-request-action {
+            transition: none;
+        }
+        .flux-friend-more {
+            transition: none;
+        }
     }
 }
