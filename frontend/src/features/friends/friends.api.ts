@@ -2,7 +2,7 @@ import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { API_URL } from "../../lib/config";
 import { createApiRequestError } from "../../lib/api-request-error";
 import { runRequestAttempt } from "../../lib/request-retry";
-import type { Friend, FriendRequest, FriendRequestDirection } from "./friends.types";
+import type { Friend, FriendRequest, FriendRequestDirection, FriendshipRemovedEvent } from "./friends.types";
 
 type FriendsResponse = {
     friends: Friend[];
@@ -14,6 +14,10 @@ type IncomingFriendRequestsResponse = {
 
 type OutgoingFriendRequestsResponse = {
     requests: { id: string; createdAt: string; receiver: Friend }[];
+};
+
+type SendFriendRequestResponse = {
+    friendship: Pick<FriendRequest, "id" | "createdAt">;
 };
 
 // Получает функцию защищённых запросов и необязательный signal отмены.
@@ -59,6 +63,24 @@ export const getFriendRequests = async (
         { signal },
     );
 
+// Получает id получателя, защищённый request и необязательный signal отмены.
+// Отправляет POST создания заявки и читает её id и дату из ответа backend.
+// Возвращает созданную заявку без профиля; данные получателя уже есть в поиске.
+export const sendFriendRequest = async (
+    userId: string,
+    authenticatedRequest: AuthenticatedRequest,
+    { signal }: { signal?: AbortSignal } = {},
+): Promise<Pick<FriendRequest, "id" | "createdAt">> =>
+    runRequestAttempt(async (requestSignal) => {
+        const response = await authenticatedRequest(`${API_URL}/friends/requests/${encodeURIComponent(userId)}`, {
+            method: "POST",
+            signal: requestSignal,
+        });
+        if (!response.ok) throw await createApiRequestError(response, "Failed to send friend request");
+        const data = (await response.json()) as SendFriendRequestResponse;
+        return { id: data.friendship.id, createdAt: data.friendship.createdAt };
+    }, { signal });
+
 // Получает id входящей заявки и функцию защищённых запросов.
 // Отправляет POST принятия; права получателя проверяет backend.
 // Завершает Promise после успеха; данные пользователя уже есть в загруженной заявке.
@@ -93,14 +115,14 @@ export const deleteFriendRequest = async (
 
 // Получает id друга и функцию защищённых запросов.
 // Отправляет DELETE; отсутствие дружбы после повторного действия тоже считает успехом.
-// Завершает Promise после удаления либо возвращает HTTP-ошибку через throw.
-export const removeFriend = async (userId: string, authenticatedRequest: AuthenticatedRequest): Promise<void> =>
+// Возвращает результат удаления в формате socket; null означает, что дружбы уже не было.
+export const removeFriend = async (userId: string, authenticatedRequest: AuthenticatedRequest): Promise<FriendshipRemovedEvent | null> =>
     runRequestAttempt(async (signal) => {
         const response = await authenticatedRequest(`${API_URL}/friends/${encodeURIComponent(userId)}`, {
             method: "DELETE",
             signal,
         });
-        if (!response.ok && response.status !== 404) {
-            throw await createApiRequestError(response, "Failed to remove friend");
-        }
+        if (response.status === 404) return null;
+        if (!response.ok) throw await createApiRequestError(response, "Failed to remove friend");
+        return await response.json() as FriendshipRemovedEvent;
     });

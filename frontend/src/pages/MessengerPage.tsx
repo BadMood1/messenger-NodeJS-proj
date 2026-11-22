@@ -9,6 +9,7 @@ import { useAuth } from "../features/auth/useAuth";
 import { useConversations } from "../features/conversations/useConversations";
 import type { Conversation } from "../features/conversations/conversations.types";
 import { useConversationRead } from "../features/conversations/useConversationRead";
+import { useFriendshipLists } from "../features/friends/useFriendshipLists";
 import { useConversationMessages } from "../features/messages/useConversationMessages";
 import { useLastVisibleMessage } from "../features/messages/scroll/useLastVisibleMessage";
 import type { Message, MessageDeletedEvent } from "../features/messages/messages.types";
@@ -21,6 +22,13 @@ export const MessengerPage = () => {
     const [activeSection, setActiveSection] = useState<MessengerSection>("chats");
     const shellRef = useRef<HTMLElement | null>(null); // ссылка на элемент main
     const isAuthenticated = Boolean(accessToken);
+
+    // ------- ДРУЗЬЯ И ЗАЯВКИ -------
+    // Списки принадлежат странице: socket обновляет их и при скрытой панели Friends.
+    const friendshipLists = useFriendshipLists({
+        authenticatedRequest,
+        isActive: isAuthenticated && activeSection === "friends",
+    });
 
     // ------- СПИСОК ДИАЛОГОВ -------
     // Берём данные о диалогах из нашего хука
@@ -191,6 +199,8 @@ export const MessengerPage = () => {
         onMessageDeleted,
         onConversationRead: handleConversationRead,
         onConversationReadReceipt: handleConversationReadReceipt,
+        onFriendRequestCreated: friendshipLists.handleFriendRequestCreated,
+        onFriendshipChanged: friendshipLists.handleFriendshipChanged,
         onConnected,
     });
     const isOffline = connectionStatus === "offline";
@@ -352,7 +362,7 @@ export const MessengerPage = () => {
                         />
                     </div>
                     <div className="flux-panel-view flux-panel-view-friends" data-active={activeSection === "friends"} inert={activeSection !== "friends"} aria-hidden={activeSection !== "friends"}>
-                        <FriendsPanel isActive={activeSection === "friends"} conversations={conversations}
+                        <FriendsPanel isActive={activeSection === "friends"} friendshipLists={friendshipLists} conversations={conversations}
                             onSelectSection={selectMessengerSection} onConversationReady={handleFriendConversationReady} />
                     </div>
                 </div>

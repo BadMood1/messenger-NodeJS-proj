@@ -120,7 +120,7 @@ export const FriendRequestsList = ({
                                     >
                                         {requestDateFormatter.format(new Date(createdAt))}
                                     </time>
-                                    <div className="flex w-full shrink-0 justify-end gap-2 sm:w-auto">
+                                    <div className={isIncoming ? "grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:justify-end" : "shrink-0"}>
                                         {isIncoming && (
                                             <button
                                                 type="button"
@@ -143,7 +143,9 @@ export const FriendRequestsList = ({
                                         )}
                                         <button
                                             type="button"
-                                            className="flux-friend-request-action"
+                                            className={isIncoming
+                                                ? "flux-friend-request-action"
+                                                : "flux-icon-button max-sm:size-11 enabled:cursor-pointer disabled:opacity-50 motion-reduce:transition-none"}
                                             disabled={pendingAction !== null}
                                             aria-label={`${isIncoming ? "Decline request from" : "Cancel request to"} @${user.username}`}
                                             onClick={() => void onRequestAction(request, "delete")}
@@ -157,7 +159,7 @@ export const FriendRequestsList = ({
                                             ) : (
                                                 <X size={14} aria-hidden="true" />
                                             )}
-                                            {isIncoming ? "Decline" : "Cancel"}
+                                            {isIncoming && "Decline"}
                                         </button>
                                     </div>
                                     {actionError?.requestId === id && (

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AuthenticatedRequest } from "../auth/authenticated-request";
 import { requestWithRetry, type RequestRetryState } from "../../lib/request-retry";
-import { getFriends, removeFriend } from "./friends.api";
+import { getFriends } from "./friends.api";
 import type { Friend } from "./friends.types";
 
 // Получает защищённый request и признак открытого раздела Friends.
@@ -73,23 +73,22 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
     // Получает пользователя после успешного принятия входящей заявки.
     // Добавляет его первым без дубля; если первый GET ещё идёт, сохраняет добавление для его ответа.
     // Обновляет загруженный список друзей без нового запроса.
-    const addFriendToList = (friend: Friend) => {
+    const addFriendToList = useCallback((friend: Friend) => {
         friendChangesDuringLoadRef.current.set(friend.id, friend);
         setFriends((previousFriends) => {
             // Если полный список ещё не загрузился, не подменяем его одним новым другом.
             if (previousFriends === null) return null;
             return [friend, ...previousFriends.filter((item) => item.id !== friend.id)];
         });
-    };
+    }, []);
 
-    // Получает id друга после подтверждения в модалке.
-    // Удаляет дружбу через API и исключает пользователя из текущего списка.
-    // Обновляет UI без GET; при ошибке оставляет список прежним и пробрасывает ошибку модалке.
-    const removeFriendFromList = async (userId: string) => {
-        await removeFriend(userId, authenticatedRequest);
+    // Получает id друга после успешного DELETE или socket-события.
+    // Исключает пользователя из списка и запоминает удаление для текущего GET.
+    // Обновляет UI без запроса; REST вызывает общий обработчик в useFriendshipLists.
+    const removeFriendFromList = useCallback((userId: string) => {
         friendChangesDuringLoadRef.current.set(userId, null);
         setFriends((previousFriends) => previousFriends?.filter((friend) => friend.id !== userId) ?? null);
-    };
+    }, []);
 
     return {
         friends: friends ?? [],

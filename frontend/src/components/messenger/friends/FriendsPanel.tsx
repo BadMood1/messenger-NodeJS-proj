@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../../features/auth/useAuth";
 import type { Conversation } from "../../../features/conversations/conversations.types";
 import { useOpenDirectConversation } from "../../../features/conversations/useOpenDirectConversation";
-import { useFriends } from "../../../features/friends/useFriends";
-import { useFriendRequests } from "../../../features/friends/useFriendRequests";
+import type { FriendshipLists } from "../../../features/friends/useFriendshipLists";
 import type {
     Friend,
     FriendRequest,
@@ -15,12 +14,14 @@ import type {
 import { MessengerMobileNav } from "../MessengerMobileNav";
 import type { MessengerSection } from "../NavRail";
 import { RequestRetryStatus } from "../RequestRetryStatus";
-import { FriendRow } from "./FriendRow";
+import { AddFriendDialog } from "./AddFriendDialog";
+import { FriendRow, type OpenFriendMenu } from "./FriendRow";
 import { FriendRemoveDialog } from "./FriendRemoveDialog";
 import { FriendRequestsList } from "./FriendRequestsList";
 
 type FriendsPanelProps = {
     isActive: boolean;
+    friendshipLists: FriendshipLists;
     conversations: Conversation[];
     onSelectSection: (section: MessengerSection) => void;
     onConversationReady: (conversation: Conversation) => void;
@@ -37,11 +38,13 @@ const friendLists = [
 // Возвращает панель Friends; API и состояние списка остаются в отдельных хуках.
 export const FriendsPanel = ({
     isActive, // открыт ли раздел
+    friendshipLists,
     conversations,
     onSelectSection,
     onConversationReady,
 }: FriendsPanelProps) => {
     const { authenticatedRequest } = useAuth();
+    const { friendsState, incomingRequests, outgoingRequests } = friendshipLists;
     const {
         friends,
         hasLoaded,
@@ -49,14 +52,11 @@ export const FriendsPanel = ({
         error,
         requestRetry,
         retryFriends,
-        addFriendToList,
-        removeFriendFromList,
-    } = useFriends(authenticatedRequest, isActive);
+    } = friendsState;
     // friends/incoming/outgoing
     const [activeList, setActiveList] = useState<"friends" | FriendRequestDirection>("friends");
-    // Оба направления загружаются независимо при входе в Friends; смена списка не запускает GET.
-    const incomingRequests = useFriendRequests("incoming", authenticatedRequest, isActive);
-    const outgoingRequests = useFriendRequests("outgoing", authenticatedRequest, isActive);
+    const [openFriendMenu, setOpenFriendMenu] = useState<OpenFriendMenu | null>(null);
+    // Оба направления приходят из useFriendshipLists; смена вкладки не запускает GET.
     const requestLists = { incoming: incomingRequests, outgoing: outgoingRequests };
     // Счетчики
     // До первой успешной загрузки не показываем ложный ноль во вкладке.
@@ -78,9 +78,17 @@ export const FriendsPanel = ({
     // Дожидается обработки в его хуке; после принятия добавляет пользователя в Friends.
     // Обновляет оба списка локально, даже если за время POST переключили вкладку.
     const handleFriendRequestAction = async (request: FriendRequest, action: FriendRequestAction) => {
-        if (!activeRequests) return; // если открыто friends, то будет null
-        const isCompleted = await activeRequests.submitFriendRequestAction(request, action);
-        if (isCompleted && action === "accept") addFriendToList(request.user);
+        if (activeList === "friends") return; // если открыто friends, activeRequests будет null
+        await friendshipLists.performFriendRequestAction(activeList, request, action);
+    };
+
+    // Получает конфликт отношений при отправке новой заявки из поиска.
+    // Перечитывает друзей и оба направления заявок через существующие загрузчики.
+    // Согласует списки с backend; успешная отправка использует локальное добавление без этих GET.
+    const refreshFriendshipLists = () => {
+        retryFriends();
+        incomingRequests.retryRequests();
+        outgoingRequests.retryRequests();
     };
 
     // ------- ОТКРЫТИЕ ПЕРЕПИСКИ -------
@@ -132,6 +140,13 @@ export const FriendsPanel = ({
                         aria-label="Refreshing list"
                     />
                 )}
+                <AddFriendDialog
+                    onShowIncomingRequests={() => setActiveList("incoming")}
+                    onRequestSent={friendshipLists.handleOutgoingRequestSent}
+                    friendshipChangesByUserId={friendshipLists.friendshipChangesByUserId}
+                    hasConfirmedOutgoingRequestSince={friendshipLists.hasConfirmedOutgoingRequestSince}
+                    onFriendshipConflict={refreshFriendshipLists}
+                />
             </header>
 
             <nav className="shrink-0 px-4 pt-4 lg:px-8" aria-label="Friend lists">
@@ -142,7 +157,10 @@ export const FriendsPanel = ({
                             type="button"
                             className="flux-friends-tab"
                             aria-pressed={activeList === id}
-                            onClick={() => setActiveList(id)}
+                            onClick={() => {
+                                setOpenFriendMenu(null);
+                                setActiveList(id);
+                            }}
                         >
                             {/* У подписи и счётчика общая базовая линия текста. */}
                             <span className="inline-flex items-baseline gap-1.5">
@@ -214,6 +232,8 @@ export const FriendsPanel = ({
                                         actionsDisabled={openingUserId !== null}
                                         onOpenConversation={openConversationForUser}
                                         onRemoveFriend={confirmFriendRemoval}
+                                        openMenu={isActive && activeList === "friends" ? openFriendMenu : null}
+                                        setOpenMenu={setOpenFriendMenu}
                                     />
                                 ))}
                             </ul>
@@ -234,7 +254,7 @@ export const FriendsPanel = ({
                 friend={friendToRemove}
                 isOpen={isRemoveDialogOpen}
                 onOpenChange={setIsRemoveDialogOpen}
-                onRemove={removeFriendFromList}
+                onRemove={friendshipLists.removeFriendAndSyncState}
                 onRestoreFocus={() => headingRef.current?.focus({ preventScroll: true })}
             />
         </section>

@@ -14,6 +14,7 @@ type UserSearchState = {
     isLoading: boolean;
     error: string | null;
     requestRetry: RequestRetryState | null;
+    requestStartedAt: number;
 };
 
 type UseUserSearchOptions = {
@@ -41,19 +42,24 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
         // Загружает пользователей через общую политику ограниченных повторов.
         // Сохраняет результат или ошибку, только если этот поиск ещё не отменён.
         const loadUsers = async () => {
+            let requestStartedAt = performance.now();
             setSearchState({
                 searchQuery: normalizedSearchQuery,
                 users: [],
                 isLoading: true,
                 error: null,
                 requestRetry: null,
+                requestStartedAt,
             });
             try {
                 const users = await requestWithRetry(
-                    () =>
-                        searchUsers(normalizedSearchQuery, authenticatedRequest, {
+                    () => {
+                        // Каждая попытка GET получает своё время начала для сравнения с live-изменениями.
+                        requestStartedAt = performance.now();
+                        return searchUsers(normalizedSearchQuery, authenticatedRequest, {
                             signal: controller.signal,
-                        }),
+                        });
+                    },
                     {
                         signal: controller.signal,
                         // Если GET вернул временную ошибку, показываем Retry с обратным отсчётом.
@@ -72,6 +78,7 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
                     isLoading: false,
                     error: null,
                     requestRetry: null,
+                    requestStartedAt,
                 });
             } catch (error) {
                 if (controller.signal.aborted) return;
@@ -81,6 +88,7 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
                     isLoading: false,
                     error: error instanceof Error ? error.message : "Failed to search users",
                     requestRetry: null,
+                    requestStartedAt,
                 });
             }
         };
@@ -118,5 +126,6 @@ export const useUserSearch = ({ query, isEnabled, authenticatedRequest }: UseUse
         isSearchQueryLongEnough,
         retryUserSearch,
         clearUserSearchResults,
+        requestStartedAt: currentSearchState?.requestStartedAt ?? 0,
     };
 };

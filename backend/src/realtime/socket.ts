@@ -81,6 +81,18 @@ export const initializeSocketServer = (httpServer: HttpServer, frontendOrigin: s
     return io;
 };
 
+// Получает userId, имя события и готовые данные для доставки.
+// Выбирает персональную room пользователя на существующем Socket.IO-сервере.
+// Отправляет событие всем его подключённым вкладкам без дополнительного запроса к БД.
+export const publishToUser = (userId: string, eventName: string, payload: unknown) => {
+    try {
+        socketServer?.to(`user:${userId}`).emit(eventName, payload);
+    } catch {
+        // Ошибка доставки не отменяет уже сохранённое действие REST; вторую сторону всё равно уведомим.
+        console.error(`[socket] Failed to publish ${eventName}`);
+    }
+};
+
 // Ф-ция находит участников чата и возвращает сформированные rooms
 const getConversationRooms = async (conversationId: string) => {
     // Берём пользователей конкретного чата, включая отправителя. Это userId, а не вкладки/socket'ы.
