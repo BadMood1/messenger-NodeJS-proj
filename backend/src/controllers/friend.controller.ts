@@ -74,7 +74,12 @@ export const removeFriendController = async (req: Request<{ userId: string }>, r
     const currentUserId = res.locals.userId;
     const friendId = req.params.userId;
 
-    await removeFriend(currentUserId, friendId);
+    const friendship = await removeFriend(currentUserId, friendId);
 
-    return res.status(204).send();
+    return res.status(200).json({
+        type: "friend-removed",
+        friendshipId: friendship.id,
+        createdAt: friendship.createdAt,
+        userId: friendId,
+    });
 };

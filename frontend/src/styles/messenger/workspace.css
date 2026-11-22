@@ -1,0 +1,124 @@
+@layer components {
+    /* Sidebar лежит под основной панелью: она закрывает его, а не меняет его размер. */
+    .flux-messenger-workspace {
+        --flux-section-duration: 160ms;
+        --flux-content-delay: 60ms;
+        @apply relative z-10 h-full min-h-0 min-w-0 flex-1;
+    }
+
+    .flux-sidebar-slot,
+    .flux-main-panel {
+        position: absolute;
+        inset: 0;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    .flux-main-panel {
+        /* Непрозрачная основа не даёт тексту sidebar просвечивать через градиент. */
+        @apply z-10 overflow-hidden bg-[#f8fbff] bg-linear-to-br from-white/98 via-[#f8fbff]/96 to-[#eef6ff]/92 dark:bg-[#061423] dark:from-[#07182a] dark:via-[#061423] dark:to-[#05111f];
+    }
+
+    /* Сменяется только содержимое: внешняя поверхность панели не исчезает. */
+    .flux-panel-view {
+        @apply pointer-events-none invisible absolute inset-0 opacity-0;
+        /* Задержка + смена прозрачности укладываются в общую длительность перехода. */
+        transition:
+            opacity calc(var(--flux-section-duration) - var(--flux-content-delay)) ease-in
+                var(--flux-content-delay),
+            visibility 0s linear var(--flux-section-duration);
+    }
+
+    .flux-panel-view[data-active="true"] {
+        @apply pointer-events-auto visible opacity-100;
+        /* Оба слоя меняют прозрачность одновременно, без пустого кадра между ними. */
+        transition:
+            opacity calc(var(--flux-section-duration) - var(--flux-content-delay)) ease-out
+                var(--flux-content-delay),
+            visibility 0s;
+    }
+
+    @media (width >= 64rem) {
+        .flux-messenger-workspace {
+            --flux-sidebar-width: 20rem;
+            /* 100cqw ниже — постоянная ширина всей рабочей области, а не движущейся панели. */
+            container-type: inline-size;
+            margin-left: -1px;
+        }
+
+        .flux-sidebar-slot {
+            right: auto;
+            width: var(--flux-sidebar-width);
+            overflow: clip;
+            transition: opacity var(--flux-section-duration) ease-in-out;
+        }
+
+        /* Только приглушаем sidebar под движущейся панелью, не скрывая его полностью. */
+        .flux-messenger-workspace[data-section="friends"] .flux-sidebar-slot {
+            opacity: 0.72;
+        }
+
+        .flux-sidebar-slot > .flux-conversation-sidebar {
+            width: var(--flux-sidebar-width);
+            margin-left: 0;
+        }
+
+        .flux-main-panel {
+            @apply rounded-[22px] border border-white/85 shadow-[0_18px_52px_rgba(71,112,160,0.10)] dark:border-cyan-100/9 dark:shadow-[0_20px_58px_rgba(0,0,0,0.24)];
+            left: var(--flux-sidebar-width);
+            transition: left var(--flux-section-duration) ease-in-out;
+        }
+
+        .flux-messenger-workspace[data-section="friends"] .flux-main-panel {
+            left: 0;
+        }
+
+        /* Контент закреплён справа: движение рамки не меняет переносы и высоту сообщений. */
+        .flux-panel-view {
+            left: auto;
+        }
+
+        .flux-panel-view-chat {
+            /* Вычитаем две границы внешней панели по 1px. */
+            width: calc(100cqw - var(--flux-sidebar-width) - 2px);
+        }
+
+        .flux-panel-view-friends {
+            width: calc(100cqw - 2px);
+        }
+    }
+
+    @media (width < 64rem) {
+        /* Mobile сохраняет отдельные экраны list/chat; Friends занимает ту же полную область. */
+        .flux-panel-view {
+            transition:
+                opacity 120ms ease-out,
+                visibility 0s linear 120ms;
+        }
+
+        .flux-panel-view[data-active="true"] {
+            transition:
+                opacity 120ms ease-out,
+                visibility 0s;
+        }
+
+        .flux-messenger-shell[data-chat-open="false"]
+            .flux-messenger-workspace[data-section="chats"]
+            .flux-main-panel {
+            display: none;
+        }
+
+        .flux-messenger-shell[data-chat-open="true"] .flux-sidebar-slot,
+        .flux-messenger-workspace[data-section="friends"] .flux-sidebar-slot {
+            display: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flux-main-panel,
+        .flux-sidebar-slot,
+        .flux-panel-view {
+            transition: none;
+        }
+    }
+}

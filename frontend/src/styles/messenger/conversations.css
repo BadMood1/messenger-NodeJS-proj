@@ -17,6 +17,11 @@
         @apply min-w-0 flex-1 truncate bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500;
     }
 
+    /* Используем одну кнопку очистки вместо дополнительного крестика браузера. */
+    .flux-conversation-search input::-webkit-search-cancel-button {
+        appearance: none;
+    }
+
     .flux-conversation-list {
         @apply min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-3;
         scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
@@ -118,5 +123,9 @@
 
     .flux-mobile-nav button {
         @apply flex min-w-0 flex-col items-center justify-center gap-1 text-sm font-medium text-slate-500 transition-colors hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-blue-400 dark:text-slate-400 dark:hover:text-cyan-300 dark:focus-visible:outline-cyan-400;
+    }
+
+    .flux-mobile-nav button[aria-current="page"] {
+        @apply text-blue-600 dark:text-cyan-300;
     }
 }

@@ -61,7 +61,7 @@ export const useConversationMessages = ({
     // Получает server id сообщения и новый текст.
     // Выполняет PATCH и передаёт ответ в тот же обработчик, что принимает socket-правки.
     // Обновляет список только для актуальной версии открытого чата.
-    const editMessage = async (messageId: string, content: string) => {
+    const editMessage = useCallback(async (messageId: string, content: string) => {
         const currentConversationId = conversationIdRef.current;
         const historyVersion = historyVersionRef.current;
 
@@ -79,12 +79,12 @@ export const useConversationMessages = ({
             // Ответ PATCH и socket-событие используют один обработчик, независимо от порядка доставки.
             handleMessageUpdated(message);
         }
-    };
+    }, [conversationIdRef, historyVersionRef, enabled, authenticatedRequest, handleMessageUpdated]);
 
     // Получает id сообщения из подтверждения удаления.
     // Убирает локальное failed либо выполняет DELETE и применяет серверный результат.
     // Возвращает результат DELETE для обновления preview диалога в MessengerPage.
-    const deleteMessage = async (messageId: string) => {
+    const deleteMessage = useCallback(async (messageId: string) => {
         const currentConversationId = conversationIdRef.current;
 
         // Failed bubble существует только локально: temp id не отправляем в DELETE API.
@@ -101,7 +101,7 @@ export const useConversationMessages = ({
             handleMessageDeleted(deletion);
         }
         return deletion;
-    };
+    }, [conversationIdRef, discardFailedMessage, enabled, authenticatedRequest, handleMessageDeleted]);
 
     return {
         ...historyView,

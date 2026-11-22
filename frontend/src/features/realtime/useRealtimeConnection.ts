@@ -6,6 +6,7 @@ import { SOCKET_URL } from "../../lib/config";
 import type { AuthContextValue } from "../auth/auth-context";
 import type { Conversation, ConversationReadResult, ConversationReadState } from "../conversations/conversations.types";
 import type { Message, MessageDeletedEvent } from "../messages/messages.types";
+import type { FriendRequestCreatedEvent, FriendshipChangedEvent } from "../friends/friends.types";
 import { useConversationTyping } from "./useConversationTyping";
 import { useConversationPresence } from "./useConversationPresence";
 
@@ -22,6 +23,8 @@ type RealtimeOptions = Pick<AuthContextValue, "getAccessToken" | "resolveAccessT
     onMessageDeleted: (message: MessageDeletedEvent) => void;
     onConversationRead: (result: ConversationReadResult) => void;
     onConversationReadReceipt: (readState: ConversationReadState) => void;
+    onFriendRequestCreated: (event: FriendRequestCreatedEvent) => void;
+    onFriendshipChanged: (event: FriendshipChangedEvent) => void;
     onConnected: () => void;
 };
 
@@ -37,9 +40,11 @@ export const useRealtimeConnection = ({
     onMessageDeleted,
     onConversationRead,
     onConversationReadReceipt,
+    onFriendRequestCreated,
+    onFriendshipChanged,
     onConnected,
 }: RealtimeOptions) => {
-    // Один socket для сообщений, typing и presence.
+    // Один socket для сообщений, typing, presence и заявок в друзья.
     const socketRef = useRef<Socket | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<RealtimeConnectionStatus>(
         () => navigator.onLine ? "connecting" : "offline",
@@ -166,6 +171,8 @@ export const useRealtimeConnection = ({
         // Прочтение в любой нашей вкладке: применяем готовую границу и счётчик без GET.
         socket.on("conversation:read", onConversationRead);
         socket.on("conversation:read-receipt", onConversationReadReceipt); // подтверждение собеседника для галочек
+        socket.on("friend-request:created", onFriendRequestCreated); // входящая/исходящая заявка уже в формате UI
+        socket.on("friendship:changed", onFriendshipChanged); // принятие, отклонение/отмена и удаление дружбы
         socket.on("conversation:typing", handleTyping); // backend добавил userId, typing hook проверит выбранный чат
         socket.on("presence:updated", handlePresenceUpdated); // общая Map обновит и sidebar, и header
 
@@ -194,6 +201,8 @@ export const useRealtimeConnection = ({
             socket.off("message:deleted", onMessageDeleted);
             socket.off("conversation:read", onConversationRead);
             socket.off("conversation:read-receipt", onConversationReadReceipt);
+            socket.off("friend-request:created", onFriendRequestCreated);
+            socket.off("friendship:changed", onFriendshipChanged);
             socket.off("conversation:typing", handleTyping);
             socket.off("presence:updated", handlePresenceUpdated);
             socket.disconnect(); // закрываем соединение и прекращаем попытки reconnect
@@ -208,6 +217,8 @@ export const useRealtimeConnection = ({
         onMessageDeleted,
         onConversationRead,
         onConversationReadReceipt,
+        onFriendRequestCreated,
+        onFriendshipChanged,
         onConnected,
         handleTyping,
         resetTyping,

@@ -1,5 +1,5 @@
 import { MessageCircleMore } from "lucide-react";
-import { useRef, useState, type RefObject } from "react";
+import { memo, useRef, useState, type RefObject } from "react";
 
 import type { Conversation } from "../../../features/conversations/conversations.types";
 import type { Message, ClientMessage } from "../../../features/messages/messages.types";
@@ -50,7 +50,8 @@ type ChatPanelProps = {
 // Получает выбранный диалог, историю и обработчики из MessengerPage.
 // Соединяет header, историю, composer и подтверждение удаления; состояние ввода хранит в одном хуке.
 // Возвращает текущий экран чата или empty state, сохраняя порядок обработки Escape.
-export const ChatPanel = (props: ChatPanelProps) => {
+// Смена activeSection не меняет данные чата: пропускаем повторный рендер всей истории.
+export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps) {
     const { conversation } = props;
     const conversationUser = conversation?.user;
     const composer = useChatComposer({
@@ -195,4 +196,4 @@ export const ChatPanel = (props: ChatPanelProps) => {
             />
         </section>
     );
-};
+});
