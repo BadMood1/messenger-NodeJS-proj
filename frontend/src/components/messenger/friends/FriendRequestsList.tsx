@@ -1,16 +1,18 @@
-import { ArrowDownLeft, ArrowUpRight, Check, LoaderCircle, X } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LoaderCircle } from "lucide-react";
+import { useState } from "react";
 
 import type {
     FriendRequest,
     FriendRequestAction,
     FriendRequestDirection,
 } from "../../../features/friends/friends.types";
-import { getInitials } from "../../../lib/get-initials";
 import type { RequestRetryState } from "../../../lib/request-retry";
 import { RequestRetryStatus } from "../RequestRetryStatus";
+import { FriendRequestRow } from "./FriendRequestRow";
 
 type FriendRequestsListProps = {
     direction: FriendRequestDirection;
+    isActive: boolean;
     requests: FriendRequest[];
     hasLoaded: boolean;
     isLoading: boolean;
@@ -22,13 +24,12 @@ type FriendRequestsListProps = {
     onRequestAction: (request: FriendRequest, action: FriendRequestAction) => Promise<void>;
 };
 
-const requestDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
-
-// Получает направление, реальные заявки и состояние их загрузки.
+// Получает направление, активность раздела, заявки и состояние их загрузки.
 // Показывает участников и действия; блокирует кнопки на время POST/DELETE.
-// Возвращает список с loading/error/empty и ошибкой действия у соответствующей заявки.
+// Возвращает список с состояниями загрузки и ошибки и держит открытым одно меню.
 export const FriendRequestsList = ({
     direction,
+    isActive,
     requests,
     hasLoaded,
     isLoading,
@@ -41,6 +42,21 @@ export const FriendRequestsList = ({
 }: FriendRequestsListProps) => {
     const isIncoming = direction === "incoming";
     const DirectionIcon = isIncoming ? ArrowDownLeft : ArrowUpRight;
+    const [openRequestMenuId, setOpenRequestMenuId] = useState<string | null>(null);
+
+    // Меню находится в портале, поэтому при уходе в Chats закрываем его вместе с панелью.
+    if (!isActive && openRequestMenuId !== null) setOpenRequestMenuId(null);
+
+    // Получает id заявки и новое состояние её меню от Radix.
+    // При открытии заменяет предыдущее меню, а при закрытии сверяет id.
+    // Сохраняет id единственного открытого меню или null.
+    const changeRequestMenuOpen = (requestId: string, isOpen: boolean) => {
+        if (isOpen) {
+            setOpenRequestMenuId(requestId);
+            return;
+        }
+        setOpenRequestMenuId((current) => current === requestId ? null : current);
+    };
 
     return (
         <div className="flux-friends-list-view" aria-busy={isLoading}>
@@ -87,92 +103,19 @@ export const FriendRequestsList = ({
                         className="mx-auto max-w-3xl space-y-2"
                         aria-label={`${isIncoming ? "Incoming" : "Outgoing"} friend requests`}
                     >
-                        {requests.map((request) => {
-                            const { id, createdAt, user } = request;
-                            const isSubmittingRequest = pendingAction?.requestId === id;
-                            return (
-                                <li
-                                    key={id}
-                                    className="flux-friend-row flex-wrap gap-3 px-3 py-3.5"
-                                    aria-busy={isSubmittingRequest}
-                                >
-                                    <span
-                                        className="flux-conversation-avatar shrink-0 overflow-hidden"
-                                        aria-hidden="true"
-                                    >
-                                        {user.image ? (
-                                            <img src={user.image} alt="" className="size-full object-cover" />
-                                        ) : (
-                                            getInitials(user.name || user.username)
-                                        )}
-                                    </span>
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                                            {user.name || user.username}
-                                        </p>
-                                        <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                                            @{user.username}
-                                        </p>
-                                    </div>
-                                    <time
-                                        dateTime={createdAt}
-                                        className="shrink-0 whitespace-nowrap text-[11px] text-slate-400 dark:text-slate-500"
-                                    >
-                                        {requestDateFormatter.format(new Date(createdAt))}
-                                    </time>
-                                    <div className={isIncoming ? "grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:justify-end" : "shrink-0"}>
-                                        {isIncoming && (
-                                            <button
-                                                type="button"
-                                                className="flux-friend-request-action flux-friend-request-accept"
-                                                disabled={pendingAction !== null}
-                                                aria-label={`Accept request from @${user.username}`}
-                                                onClick={() => void onRequestAction(request, "accept")}
-                                            >
-                                                {isSubmittingRequest && pendingAction.action === "accept" ? (
-                                                    <LoaderCircle
-                                                        size={14}
-                                                        className="animate-spin motion-reduce:animate-none"
-                                                        aria-hidden="true"
-                                                    />
-                                                ) : (
-                                                    <Check size={14} aria-hidden="true" />
-                                                )}
-                                                Accept
-                                            </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            className={isIncoming
-                                                ? "flux-friend-request-action"
-                                                : "flux-icon-button max-sm:size-11 enabled:cursor-pointer disabled:opacity-50 motion-reduce:transition-none"}
-                                            disabled={pendingAction !== null}
-                                            aria-label={`${isIncoming ? "Decline request from" : "Cancel request to"} @${user.username}`}
-                                            onClick={() => void onRequestAction(request, "delete")}
-                                        >
-                                            {isSubmittingRequest && pendingAction.action === "delete" ? (
-                                                <LoaderCircle
-                                                    size={14}
-                                                    className="animate-spin motion-reduce:animate-none"
-                                                    aria-hidden="true"
-                                                />
-                                            ) : (
-                                                <X size={14} aria-hidden="true" />
-                                            )}
-                                            {isIncoming && "Decline"}
-                                        </button>
-                                    </div>
-                                    {actionError?.requestId === id && (
-                                        <p
-                                            role="alert"
-                                            className="w-full text-xs text-rose-600 dark:text-rose-300"
-                                        >
-                                            {actionError.message}
-                                        </p>
-                                    )}
-                                </li>
-                            );
-                        })}
+                        {requests.map((request) => (
+                            <FriendRequestRow
+                                key={request.id}
+                                request={request}
+                                isIncoming={isIncoming}
+                                actionsDisabled={!isActive || pendingAction !== null}
+                                pendingAction={pendingAction?.requestId === request.id ? pendingAction.action : null}
+                                actionError={actionError?.requestId === request.id ? actionError.message : null}
+                                isMenuOpen={openRequestMenuId === request.id}
+                                onMenuOpenChange={changeRequestMenuOpen}
+                                onRequestAction={onRequestAction}
+                            />
+                        ))}
                     </ul>
                 ))}
         </div>

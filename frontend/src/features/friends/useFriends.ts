@@ -5,7 +5,7 @@ import { requestWithRetry, type RequestRetryState } from "../../lib/request-retr
 import { getFriends } from "./friends.api";
 import type { Friend } from "./friends.types";
 
-// Получает защищённый request и признак открытого раздела Friends.
+// Получает защищённый request и признак авторизации в Messenger.
 // Загружает список с ограниченными повторами, сохраняя прежние данные при смене раздела.
 // Возвращает друзей, состояния загрузки/ошибки, ручной Retry и локальное добавление/удаление.
 export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled: boolean) => {
@@ -26,7 +26,7 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
         const friendChangesDuringLoad = new Map<string, Friend | null>();
         friendChangesDuringLoadRef.current = friendChangesDuringLoad;
 
-        // Получает запуск раздела или новую попытку загрузки.
+        // Получает запуск Messenger, ручной Retry или сигнал сверки после подключения.
         // Выполняет GET через общую политику retry и сохраняет успешный ответ.
         // Обновляет UI только пока эта загрузка не отменена.
         const loadFriends = async () => {
@@ -60,14 +60,14 @@ export const useFriends = (authenticatedRequest: AuthenticatedRequest, isEnabled
         };
 
         void loadFriends();
-        // Уход в Chats отменяет и fetch, и таймер ожидающего повтора.
+        // Новая загрузка или уход из Messenger отменяет и fetch, и таймер ожидающего повтора.
         return () => controller.abort();
     }, [authenticatedRequest, isEnabled, reloadVersion]);
 
-    // Получает ручной Retry после окончательной ошибки.
+    // Получает ручной Retry или запрос общей сверки Friends после подключения.
     // Меняет номер загрузки, чтобы effect начал новую ограниченную серию.
     // Повторяет GET; сам обработчик не отправляет запрос.
-    const retryFriends = () => setReloadVersion((version) => version + 1);
+    const retryFriends = useCallback(() => setReloadVersion((version) => version + 1), []);
 
     // ------- ЛОКАЛЬНОЕ ДОБАВЛЕНИЕ И УДАЛЕНИЕ -------
     // Получает пользователя после успешного принятия входящей заявки.

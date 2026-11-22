@@ -27,8 +27,10 @@ export const MessengerPage = () => {
     // Списки принадлежат странице: socket обновляет их и при скрытой панели Friends.
     const friendshipLists = useFriendshipLists({
         authenticatedRequest,
-        isActive: isAuthenticated && activeSection === "friends",
+        isEnabled: isAuthenticated,
     });
+    // const syncFriendshipLists = friendshipLists.syncFriendshipLists;
+    const { syncFriendshipLists } = friendshipLists;
 
     // ------- СПИСОК ДИАЛОГОВ -------
     // Берём данные о диалогах из нашего хука
@@ -156,26 +158,37 @@ export const MessengerPage = () => {
     // Получает id сообщения из подтверждения удаления.
     // Удаляет его через message hook и передаёт результат DELETE в sidebar даже без socket.
     // Обновляет preview тем же обработчиком, который принимает socket-событие; повторы пропускаются.
-    const deleteMessageAndUpdateConversationPreview = useCallback(async (messageId: string) => {
-        const deletion = await deleteMessage(messageId);
-        if (deletion) handleConversationMessageDeleted(deletion);
-    }, [deleteMessage, handleConversationMessageDeleted]);
+    const deleteMessageAndUpdateConversationPreview = useCallback(
+        async (messageId: string) => {
+            const deletion = await deleteMessage(messageId);
+            if (deletion) handleConversationMessageDeleted(deletion);
+        },
+        [deleteMessage, handleConversationMessageDeleted],
+    );
 
     // ------- СИНХРОНИЗАЦИЯ ПОСЛЕ CONNECT / RECONNECT -------
-    // Получает сигнал об успешном подключении socket.
+    // Получает сигнал восстановления сети браузера или подключения socket.
     // Запрашивает актуальную историю открытого чата и список диалогов.
     // Обновляет сообщения и sidebar, возобновляет очередь прочтения после connect/reconnect.
-    const onConnected = useCallback(() => {
+    const resumeMessengerRequests = useCallback(() => {
         requestHistorySync(); // сверка истории открытого чата
         retryConversations(); // обновление списка диалогов, в том числе после исчерпания retry
         resumeReadPositionSync(); // сохраняем позиции, накопленные без связи, включая закрытые чаты
     }, [requestHistorySync, retryConversations, resumeReadPositionSync]);
 
+    // Получает успешный connect, включая первое подключение и reconnect.
+    // Возобновляет запросы мессенджера и запускает REST-сверку всех трёх списков Friends.
+    // Обновляет данные после пропущенных событий, в том числе при открытом Chats.
+    const onConnected = useCallback(() => {
+        resumeMessengerRequests();
+        syncFriendshipLists();
+    }, [resumeMessengerRequests, syncFriendshipLists]);
+
     // После реального online возобновляем загрузки, даже если socket пока не подключился.
     useEffect(() => {
-        window.addEventListener("online", onConnected);
-        return () => window.removeEventListener("online", onConnected);
-    }, [onConnected]);
+        window.addEventListener("online", resumeMessengerRequests);
+        return () => window.removeEventListener("online", resumeMessengerRequests);
+    }, [resumeMessengerRequests]);
 
     // ------- ПОДКЛЮЧЕНИЕ SOCKET -------
     // дальше эти данные передадим в ChatPannel
@@ -301,7 +314,11 @@ export const MessengerPage = () => {
             />
 
             <div className="flux-messenger-workspace" data-section={activeSection}>
-                <div className="flux-sidebar-slot" inert={activeSection !== "chats"} aria-hidden={activeSection !== "chats"}>
+                <div
+                    className="flux-sidebar-slot"
+                    inert={activeSection !== "chats"}
+                    aria-hidden={activeSection !== "chats"}
+                >
                     {/* ==================== CONVERSATIONS ==================== */}
                     <ConversationSidebar
                         conversations={conversations}
@@ -322,7 +339,12 @@ export const MessengerPage = () => {
                 {/* ==================== CHAT ==================== */}
                 <div className="flux-main-panel">
                     {/* Обе панели остаются смонтированы; inert исключает скрытую из фокуса и кликов. */}
-                    <div className="flux-panel-view flux-panel-view-chat" data-active={activeSection === "chats"} inert={activeSection !== "chats"} aria-hidden={activeSection !== "chats"}>
+                    <div
+                        className="flux-panel-view flux-panel-view-chat"
+                        data-active={activeSection === "chats"}
+                        inert={activeSection !== "chats"}
+                        aria-hidden={activeSection !== "chats"}
+                    >
                         <ChatPanel
                             key={selectedConversation?.id ?? "no-conversation"}
                             conversation={selectedConversation}
@@ -361,9 +383,19 @@ export const MessengerPage = () => {
                             onStopTyping={stopTyping}
                         />
                     </div>
-                    <div className="flux-panel-view flux-panel-view-friends" data-active={activeSection === "friends"} inert={activeSection !== "friends"} aria-hidden={activeSection !== "friends"}>
-                        <FriendsPanel isActive={activeSection === "friends"} friendshipLists={friendshipLists} conversations={conversations}
-                            onSelectSection={selectMessengerSection} onConversationReady={handleFriendConversationReady} />
+                    <div
+                        className="flux-panel-view flux-panel-view-friends"
+                        data-active={activeSection === "friends"}
+                        inert={activeSection !== "friends"}
+                        aria-hidden={activeSection !== "friends"}
+                    >
+                        <FriendsPanel
+                            isActive={activeSection === "friends"}
+                            friendshipLists={friendshipLists}
+                            conversations={conversations}
+                            onSelectSection={selectMessengerSection}
+                            onConversationReady={handleFriendConversationReady}
+                        />
                     </div>
                 </div>
             </div>

@@ -16,18 +16,30 @@ import { useFriendRequests } from "./useFriendRequests";
 
 type UseFriendshipListsOptions = {
     authenticatedRequest: AuthenticatedRequest;
-    isActive: boolean;
+    isEnabled: boolean;
 };
 
-// Получает защищённый request и признак открытого раздела Friends.
+// Получает защищённый request и признак авторизации в Messenger.
 // объединяет три списка Friends
-export const useFriendshipLists = ({ authenticatedRequest, isActive }: UseFriendshipListsOptions) => {
+export const useFriendshipLists = ({ authenticatedRequest, isEnabled }: UseFriendshipListsOptions) => {
     // ------- СОСТОЯНИЕ СПИСКОВ -------
     // друзья, загрузка/ошибка списка, функция добавления и удаления друга
-    const friendsState = useFriends(authenticatedRequest, isActive);
+    const friendsState = useFriends(authenticatedRequest, isEnabled);
     // входящие и исходящие заявки + действия с ними
-    const incomingRequests = useFriendRequests("incoming", authenticatedRequest, isActive);
-    const outgoingRequests = useFriendRequests("outgoing", authenticatedRequest, isActive);
+    const incomingRequests = useFriendRequests("incoming", authenticatedRequest, isEnabled);
+    const outgoingRequests = useFriendRequests("outgoing", authenticatedRequest, isEnabled);
+    const retryFriends = friendsState.retryFriends;
+    const retryIncomingRequests = incomingRequests.retryRequests;
+    const retryOutgoingRequests = outgoingRequests.retryRequests;
+
+    // Получает сигнал подключения socket или конфликт отношений при отправке новой заявки из поиска.
+    // Перечитывает друзей и оба направления заявок через существующие загрузчики.
+    // Согласует списки с backend; успешная отправка использует локальное добавление без этих GET.
+    const syncFriendshipLists = useCallback(() => {
+        retryFriends();
+        retryIncomingRequests();
+        retryOutgoingRequests();
+    }, [retryFriends, retryIncomingRequests, retryOutgoingRequests]);
 
     const addIncomingRequest = incomingRequests.addFriendRequestToList;
     const addOutgoingRequest = outgoingRequests.addFriendRequestToList;
@@ -215,6 +227,7 @@ export const useFriendshipLists = ({ authenticatedRequest, isActive }: UseFriend
         friendsState,
         incomingRequests,
         outgoingRequests,
+        syncFriendshipLists,
         friendshipChangesByUserId,
         handleFriendRequestCreated,
         handleFriendshipChanged,

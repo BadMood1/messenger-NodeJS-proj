@@ -82,15 +82,6 @@ export const FriendsPanel = ({
         await friendshipLists.performFriendRequestAction(activeList, request, action);
     };
 
-    // Получает конфликт отношений при отправке новой заявки из поиска.
-    // Перечитывает друзей и оба направления заявок через существующие загрузчики.
-    // Согласует списки с backend; успешная отправка использует локальное добавление без этих GET.
-    const refreshFriendshipLists = () => {
-        retryFriends();
-        incomingRequests.retryRequests();
-        outgoingRequests.retryRequests();
-    };
-
     // ------- ОТКРЫТИЕ ПЕРЕПИСКИ -------
     const {
         openingUserId,
@@ -145,7 +136,7 @@ export const FriendsPanel = ({
                     onRequestSent={friendshipLists.handleOutgoingRequestSent}
                     friendshipChangesByUserId={friendshipLists.friendshipChangesByUserId}
                     hasConfirmedOutgoingRequestSince={friendshipLists.hasConfirmedOutgoingRequestSince}
-                    onFriendshipConflict={refreshFriendshipLists}
+                    onFriendshipConflict={friendshipLists.syncFriendshipLists}
                 />
             </header>
 
@@ -243,6 +234,7 @@ export const FriendsPanel = ({
                     <FriendRequestsList
                         key={activeList}
                         direction={activeList}
+                        isActive={isActive}
                         {...activeRequests}
                         onRequestAction={handleFriendRequestAction}
                     />

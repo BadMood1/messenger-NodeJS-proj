@@ -11,7 +11,7 @@ import type { FriendRequest, FriendRequestAction, FriendRequestDirection } from 
 const sortFriendRequestsByDate = (requests: FriendRequest[]) => requests.toSorted((first, second) =>
     Date.parse(second.createdAt) - Date.parse(first.createdAt) || first.id.localeCompare(second.id));
 
-// Получает постоянное направление списка, защищённый request и активность Friends.
+// Получает постоянное направление списка, защищённый request и признак авторизации в Messenger.
 // Загружает заявки с ограниченным retry; сохраняет данные при уходе из раздела.
 // Возвращает список, загрузку/retry и действия с отдельными состояниями ожидания и ошибки.
 export const useFriendRequests = (
@@ -44,7 +44,7 @@ export const useFriendRequests = (
         const requestChangesDuringLoad = new Map<string, FriendRequest | null>();
         requestChangesDuringLoadRef.current = requestChangesDuringLoad;
 
-        // Получает открытие Friends или ручной повтор загрузки.
+        // Получает запуск Messenger, ручной Retry или сигнал сверки после подключения.
         // Выполняет GET выбранного направления и сохраняет успешный ответ.
         // После отмены не меняет список, ошибку и состояние загрузки.
         const loadFriendRequests = async () => {
@@ -79,14 +79,14 @@ export const useFriendRequests = (
         };
 
         void loadFriendRequests();
-        // Уход из Friends отменяет fetch и ожидание retry, но оставляет загруженные заявки.
+        // Новая загрузка или уход из Messenger отменяет fetch и ожидание retry.
         return () => controller.abort();
     }, [direction, authenticatedRequest, isEnabled, reloadVersion]);
 
-    // Получает нажатие Retry после окончательной ошибки.
+    // Получает ручной Retry или запрос общей сверки Friends после подключения.
     // Меняет номер загрузки, чтобы effect запустил новую ограниченную серию.
     // Повторяет только этот список; второе направление и друзья не перезагружаются.
-    const retryRequests = () => setReloadVersion((version) => version + 1);
+    const retryRequests = useCallback(() => setReloadVersion((version) => version + 1), []);
 
     // ------- ДОБАВЛЕНИЕ ЗАЯВКИ ИЗ POST ИЛИ SOCKET -------
     // Получает заявку этого направления после POST или friend-request:created.
